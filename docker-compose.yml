@@ -1,0 +1,199 @@
+# version: "3.9"   # CHG: 可移除（Compose v2 會忽略）
+
+x-common-env: &common-env
+  TZ: Asia/Taipei
+
+services:
+  # ─────────────────────────────────────────────────────────
+  # Redis：LiteLLM 用量/限速快取
+  # ─────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server","--save","","--appendonly","no"]
+    environment:
+      <<: *common-env
+    ports: ["6379:6379"]
+    healthcheck:        # NEW: 簡易探活
+      test: ["CMD","redis-cli","ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────
+  # Postgres：Dashboard / 金鑰 / 模型設定儲存
+  # ─────────────────────────────────────────────────────────
+  db:
+    image: postgres:16
+    container_name: litellm_db
+    environment:
+      <<: *common-env
+      POSTGRES_DB: litellm
+      POSTGRES_USER: llmproxy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # ports: ["5432:5432"]   # OPT: 若無外連需求，建議關掉對外 port
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -d litellm -U llmproxy"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────
+  # LiteLLM Proxy + Dashboard
+  # ─────────────────────────────────────────────────────────
+  litellm:
+    build:
+      context: ./containers/litellm
+      dockerfile: Dockerfile
+      # 確認 Dockerfile 內有：RUN pip install -U "redis>=5"  # CHK
+      # platforms: ["linux/amd64"]  # OPT: 若主機是 amd64 才需要
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      PYTHONPATH: /app
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-admin}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DATABASE_URL: "postgresql://llmproxy:${POSTGRES_PASSWORD}@db:5432/litellm"
+      STORE_MODEL_IN_DB: "True"
+      UI_USERNAME: ${UI_USERNAME:-admin}
+      UI_PASSWORD: ${UI_PASSWORD:-admin123}
+      ENABLE_METRICS: "True"
+      # 每日10M tokens 上限(保留 1M 作系統用途)
+      OPENAI_TPD_LIMIT: "9000000"
+      # OPENAI_TPD_LIMIT: "5000"   # CHG: 測試用，降低上限
+      REDIS_URL: "redis://redis:6379/0"
+      TZ_OFFSET_HOURS: "8"
+      # Provider keys（.env 注入）
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      GRAPH_SCHEMA_PATH: /app/schemas/graph_schema.json
+    volumes:
+      - ./api-gateway/graph_schema.json:/app/schemas/graph_schema.json:ro
+      - ./litellm.config.yaml:/app/config.yaml:ro
+      - ./plugins:/app/plugins:ro
+    command: ["--config","/app/config.yaml"]
+    ports: ["4000:4000"]
+    # healthcheck:
+    #   test: ["CMD-SHELL", "python - <<'PY'\nimport urllib.request,sys\nu='http://localhost:4000/health'\ntry:\n  urllib.request.urlopen(u, timeout=3)\n  sys.exit(0)\nexcept Exception:\n  sys.exit(1)\nPY"]
+    #   interval: 5s
+    #   timeout: 5s
+    #   retries: 40
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────
+  # 本地嵌入：Ollama（bge-m3），啟用 GPU
+  # ─────────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      <<: *common-env
+      OLLAMA_KEEP_ALIVE: 24h
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        ollama serve & sleep 6 && \
+        ollama pull bge-m3 && \
+        tail -f /dev/null
+    ports: ["11434:11434"]
+    volumes: [ollama_models:/root/.ollama]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
+    healthcheck:
+      test: ["CMD","ollama","ps"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────
+  # 本地重排：PyTorch 版（支援 CUDA 12.x）
+  # ─────────────────────────────────────────────────────────
+  reranker:
+    image: pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+    command:
+      - bash
+      - -lc
+      - |
+        pip install --no-cache-dir -U \
+          "transformers>=4.44" "accelerate>=0.33" "sentence-transformers>=3.0" \
+          "uvicorn>=0.30" "fastapi>=0.115" && \
+        python -u /app/server.py
+    environment:
+      <<: *common-env
+      TRANSFORMERS_CACHE: /models
+      HUGGINGFACE_HUB_CACHE: /models
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      MODEL_ID: BAAI/bge-reranker-v2-m3
+      DEVICE: auto
+      DTYPE: bfloat16
+      TOKEN_MAXLEN: "512"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    shm_size: "2g"
+    volumes:
+      - ./pyreranker:/app
+      - reranker_models:/models
+    ports: ["8080:8080"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
+    healthcheck:
+      test: ["CMD-SHELL", "python - <<'PY'\nimport urllib.request,sys\nu='http://localhost:8080/health'\ntry:\n  urllib.request.urlopen(u, timeout=3)\n  sys.exit(0)\nexcept Exception:\n  sys.exit(1)\nPY"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────
+  # API Gateway：你的系統對外只需打這層
+  # ─────────────────────────────────────────────────────────
+  apigw:
+    build: ./api-gateway
+    depends_on:
+      # litellm:
+      #   condition: service_healthy    # CHG: 等 litellm 健康
+      ollama:
+        condition: service_healthy
+      reranker:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      LITELLM_BASE: http://litellm:4000/v1
+      LITELLM_KEY: ${LITELLM_KEY:-sk-admin}
+      OLLAMA_BASE: http://ollama:11434
+      RERANKER_URL: http://reranker:8080
+    ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD-SHELL", "python - <<'PY'\nimport urllib.request,sys\nu='http://localhost:8000/health'\ntry:\n  urllib.request.urlopen(u, timeout=3)\n  sys.exit(0)\nexcept Exception:\n  sys.exit(1)\nPY"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    name: litellm_postgres_data
+  ollama_models:
+  reranker_models:

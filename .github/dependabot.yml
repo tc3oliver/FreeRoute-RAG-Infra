@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # Keep GitHub Actions up to date
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels: ["dependencies"]
+
+  # Python deps at repo root (test tools, scripts, etc.)
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels: ["dependencies", "python"]
+
+  # API Gateway Python deps
+  - package-ecosystem: pip
+    directory: "/api-gateway"
+    schedule:
+      interval: weekly
+    labels: ["dependencies", "python"]
+
+  # Dockerfiles in repo
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels: ["dependencies", "docker"]

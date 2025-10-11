@@ -1,0 +1,30 @@
+# Never send secrets to build context
+.env
+.env.*
+!.env.example
+
+# VCS
+.git
+.gitignore
+
+# Python caches
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+
+# Editor/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Artifacts & models
+dist/
+build/
+models/
+**/reranker_models/
+**/ollama_models/

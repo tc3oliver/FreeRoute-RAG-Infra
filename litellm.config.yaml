@@ -1,0 +1,129 @@
+model_list:
+  - model_name: rag-answer
+    litellm_params:
+      model: openai/gpt-5-mini-2025-08-07
+      api_key: os.environ/OPENAI_API_KEY
+      drop_params: true
+    model_info:
+      id: rag-answer
+      mode: completion
+      base_model: openai
+
+  - model_name: rag-answer-gemini
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GOOGLE_API_KEY
+      temperature: 0.8
+      drop_params: true
+    model_info: { id: rag-answer-gemini, mode: completion, base_model: google }
+
+  # 如果你要「只用免費」的 OpenRouter，請改成 :free 變體
+  - model_name: rag-answer-openrouter
+    litellm_params:
+      model: openrouter/mistralai/mistral-small-3.2-24b-instruct:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      api_base: https://openrouter.ai/api/v1
+      temperature: 0.8
+      drop_params: true
+      extra_headers:
+        HTTP-Referer: "http://localhost"
+        X-Title: "FreeRoute RAG Infra"
+    model_info: { id: rag-answer-openrouter, mode: completion, base_model: openrouter }
+
+  - model_name: rag-answer-groq
+    litellm_params:
+      model: groq/llama-3.1-8b-instant
+      api_key: os.environ/GROQ_API_KEY
+      temperature: 0.8
+      drop_params: true
+    model_info: { id: rag-answer-groq, mode: completion, base_model: groq }
+
+  # —— 嵌入 ——
+
+  - model_name: local-embed
+    litellm_params:
+      model: ollama/bge-m3
+      api_base: http://ollama:11434
+      mode: embedding
+      drop_params: true
+    model_info: { id: local-embed, mode: embedding, base_model: ollama }
+
+
+  - model_name: graph-extractor
+    litellm_params:
+      model: openai/gpt-5-mini-2025-08-07
+      api_key: os.environ/OPENAI_API_KEY
+      temperature: 0.0
+      drop_params: true
+    model_info: { id: graph-extractor, mode: completion, base_model: openai }
+
+  - model_name: graph-extractor-o1mini
+    litellm_params:
+      model: openai/o1-mini-2024-09-12
+      api_key: os.environ/OPENAI_API_KEY
+      drop_params: true
+    model_info: { id: graph-extractor-o1mini, mode: completion, base_model: openai }
+
+  - model_name: graph-extractor-gemini
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GOOGLE_API_KEY
+      temperature: 0.0
+      drop_params: true
+    model_info: { id: graph-extractor-gemini, mode: completion, base_model: google }
+
+litellm_settings:
+  request_timeout: 60
+  json_logs: true
+  turn_off_message_logging: true
+  redact_user_api_key_info: true
+  default_litellm_params:
+    drop_params: true
+    metadata: {}
+  callbacks:
+    - "plugins.token_cap.proxy_handler_instance"
+  cache: true
+  cache_params:
+    type: redis
+    host: redis
+    port: 6379
+    namespace: litellm.cache
+    ttl: 600
+    supported_call_types: ["acompletion", "aembedding"]
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  enforce_user_param: false
+  enable_jwt_auth: false
+  background_health_checks: false
+  # ⬇︎ 新增兩行：費用保險 + 每日重置
+  max_budget_per_day: 0.0           # ← 絕對不花錢
+  usage_cache_ttl: 86400            # ← 用量緩存 24h（配合每日免費額度）
+
+router_settings:
+  # 建議改為使用量感知的 fallback
+  routing_strategy: usage_aware_fallback
+  enable_pre_call_checks: true
+  allowed_fails: 3
+  cooldown_time: 30
+  retry_policy:
+    TimeoutErrorRetries: 3
+    InternalServerErrorRetries: 2
+    RateLimitErrorRetries: 2
+
+  # 熔斷/冷卻（新增）
+  provider_circuit_breaker:
+    enabled: true
+    error_threshold: 3
+    cooldown_seconds: 120
+    trip_on_status_codes: [429,500,502,503,504]
+
+  # JSON 守門（新增）
+  json_guard:
+    enabled: true
+    retry_on_malformed_json: 1
+    strip_trailing_text: true
+
+  fallbacks:
+    - {"rag-answer": ["rag-answer-gemini", "rag-answer-openrouter", "rag-answer-groq"]}
+    - {"graph-extractor": ["graph-extractor-o1mini", "graph-extractor-o1mini", "graph-extractor-gemini"]}

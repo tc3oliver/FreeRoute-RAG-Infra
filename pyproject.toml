@@ -1,0 +1,23 @@
+[tool.black]
+line-length = 140
+target-version = ["py311"]
+include = '\.pyi?$'
+exclude = '''
+/(
+	\.venv
+| venv
+| build
+| dist
+| \.git
+| \.mypy_cache
+| \.ruff_cache
+| \.pytest_cache
+| node_modules
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+src_paths = ["api-gateway", "plugins", "pyreranker"]
