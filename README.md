@@ -57,7 +57,7 @@ flowchart TB
     FE["Web / API Client"]
   end
 
-  subgraph GATEWAY["API Gateway (8000)"]
+  subgraph GATEWAY["API Gateway (9800)"]
     G1["/chat"]
     G2["/graph/extract"]
     G3["/embed"]
@@ -65,7 +65,7 @@ flowchart TB
   end
 
   subgraph CORE["FreeRoute RAG Infra Core"]
-    subgraph LITELLM["LiteLLM Proxy (4000)"]
+  subgraph LITELLM["LiteLLM Proxy (9400)"]
       TOK["TokenCap"]
       LDB[("Dashboard UI")]
     end
@@ -192,11 +192,11 @@ Cost protection:
 
 | Service | Port | Description |
 | --- | ---: | --- |
-| LiteLLM Proxy | 4000 | OpenAI-compatible API (for LangChain/SDK) |
-| Dashboard UI | 4000 | http://localhost:9400/ui |
-| API Gateway | 8000 | /chat /embed /rerank /graph/extract |
-| Reranker | 8080 | POST /rerank (bge-reranker-v2-m3) |
-| Ollama | 11434 | bge-m3 embeddings |
+| LiteLLM Proxy | 9400 | OpenAI-compatible API (for LangChain/SDK) |
+| Dashboard UI | 9400 | http://localhost:9400/ui |
+| API Gateway | 9800 | /chat /embed /rerank /graph/extract |
+| Reranker | 9080 | POST /rerank (bge-reranker-v2-m3) |
+| Ollama | 9143 | bge-m3 embeddings |
 | Redis | 6379 | Token counters / cache |
 | Postgres | 5432 | Internal by default (not exposed) |
 
@@ -271,7 +271,7 @@ Routing strategy (TokenCap):
 
 LiteLLM (unified API)
 
-- Base URL: `http://localhost:4000/v1`
+- Base URL: `http://localhost:9400/v1`
 - Auth: `Authorization: Bearer <LITELLM_MASTER_KEY>`
 
 Example (Python / LangChain):
@@ -279,8 +279,8 @@ Example (Python / LangChain):
 ```python
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-llm = ChatOpenAI(base_url="http://localhost:4000/v1", api_key="sk-admin", model="rag-answer", temperature=0.2)
-emb = OpenAIEmbeddings(base_url="http://localhost:4000/v1", api_key="sk-admin", model="local-embed")
+llm = ChatOpenAI(base_url="http://localhost:9400/v1", api_key="sk-admin", model="rag-answer", temperature=0.2)
+emb = OpenAIEmbeddings(base_url="http://localhost:9400/v1", api_key="sk-admin", model="local-embed")
 
 print(llm.invoke("Explain RAG in three lines").content)
 print(len(emb.embed_query("Key differences between GraphRAG and RAG")))
@@ -289,7 +289,7 @@ print(len(emb.embed_query("Key differences between GraphRAG and RAG")))
 OpenAI-compatible REST:
 
 ```bash
-curl -s http://localhost:4000/v1/chat/completions \
+curl -s http://localhost:9400/v1/chat/completions \
   -H "Authorization: Bearer sk-admin" \
   -H "Content-Type: application/json" \
   -d '{"model":"rag-answer","messages":[{"role":"user","content":"List three advantages of RAG"}]}'
@@ -297,7 +297,7 @@ curl -s http://localhost:4000/v1/chat/completions \
 
 API Gateway (app layer)
 
-- Base: `http://localhost:8000`
+- Base: `http://localhost:9800`
 - Auth: `X-API-Key: <key>` (default dev-key; set via `API_GATEWAY_KEYS`)
 
 Endpoints:
@@ -317,22 +317,22 @@ Examples:
 # /chat
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"Reply in JSON with two bullet points of benefits"}],"json_mode":true,"temperature":0.2}' \
-  http://localhost:8000/chat | jq
+  http://localhost:9800/chat | jq
 
 # /embed
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"texts":["What is RAG?","What is GraphRAG?"]}' \
-  http://localhost:8000/embed | jq
+  http://localhost:9800/embed | jq
 
 # /rerank
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"query":"What is generative AI?","documents":["AI is artificial intelligence","Generative AI can create content"],"top_n":2}' \
-  http://localhost:8000/rerank | jq
+  http://localhost:9800/rerank | jq
 
 # /graph/probe (lightweight probe, no schema validation)
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"model":"graph-extractor","strict_json":true}' \
-  http://localhost:8000/graph/probe | jq
+  http://localhost:9800/graph/probe | jq
 ```
 
 ## Graph Schema
@@ -361,7 +361,7 @@ Graph extraction (recommended via Gateway):
 ```bash
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"context":"Alice joined Acme in 2022 as an engineer; Acme HQ is in Taipei, founded by Bob."}' \
-  http://localhost:8000/graph/extract | jq
+  http://localhost:9800/graph/extract | jq
 ```
 
 Common parameters:

@@ -207,11 +207,11 @@ API Gateway 補充環境變數：
 
 | 服務 | 埠 | 說明 |
 | --- | ---: | --- |
-| LiteLLM Proxy | 4000 | OpenAI 相容 API（給 LangChain/SDK） |
-| Dashboard UI | 4000 | http://localhost:9400/ui |
-| API Gateway | 8000 | /chat /embed /rerank /graph/extract |
-| Reranker | 8080 | POST /rerank（bge-reranker-v2-m3） |
-| Ollama | 11434 | bge-m3 embeddings |
+| LiteLLM Proxy | 9400 | OpenAI 相容 API（給 LangChain/SDK） |
+| Dashboard UI | 9400 | http://localhost:9400/ui |
+| API Gateway | 9800 | /chat /embed /rerank /graph/extract |
+| Reranker | 9080 | POST /rerank（bge-reranker-v2-m3） |
+| Ollama | 9143 | bge-m3 embeddings |
 | Redis | 6379 | Token 計數/快取 |
 | Postgres | 5432 | 內部用途，預設不對外 |
 
@@ -289,7 +289,7 @@ Embeddings / Rerank：
 
 LiteLLM（統一 API）
 
-- Base URL：`http://localhost:4000/v1`
+- Base URL：`http://localhost:9400/v1`
 - Auth：`Authorization: Bearer <LITELLM_MASTER_KEY>`
 
 範例（Python / LangChain）
@@ -297,8 +297,8 @@ LiteLLM（統一 API）
 ```python
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-llm = ChatOpenAI(base_url="http://localhost:4000/v1", api_key="sk-admin", model="rag-answer", temperature=0.2)
-emb = OpenAIEmbeddings(base_url="http://localhost:4000/v1", api_key="sk-admin", model="local-embed")
+llm = ChatOpenAI(base_url="http://localhost:9400/v1", api_key="sk-admin", model="rag-answer", temperature=0.2)
+emb = OpenAIEmbeddings(base_url="http://localhost:9400/v1", api_key="sk-admin", model="local-embed")
 
 print(llm.invoke("用三行說明 RAG").content)
 print(len(emb.embed_query("GraphRAG 與 RAG 差異")))
@@ -307,7 +307,7 @@ print(len(emb.embed_query("GraphRAG 與 RAG 差異")))
 OpenAI 相容 REST
 
 ```bash
-curl -s http://localhost:4000/v1/chat/completions \
+curl -s http://localhost:9400/v1/chat/completions \
   -H "Authorization: Bearer sk-admin" \
   -H "Content-Type: application/json" \
   -d '{"model":"rag-answer","messages":[{"role":"user","content":"列出三點 RAG 優點"}]}'
@@ -315,7 +315,7 @@ curl -s http://localhost:4000/v1/chat/completions \
 
 API Gateway（應用層）
 
-- Base：`http://localhost:8000`
+- Base：`http://localhost:9800`
 - Auth：`X-API-Key: <key>`（預設 dev-key，可透過 `API_GATEWAY_KEYS` 調整）
 
 路由一覽：
@@ -335,22 +335,22 @@ API Gateway（應用層）
 # /chat
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"請用 JSON 回答兩點優點"}],"json_mode":true,"temperature":0.2}' \
-  http://localhost:8000/chat | jq
+  http://localhost:9800/chat | jq
 
 # /embed
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"texts":["RAG 是什麼？","GraphRAG 是什麼？"]}' \
-  http://localhost:8000/embed | jq
+  http://localhost:9800/embed | jq
 
 # /rerank
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"query":"生成式 AI 是什麼？","documents":["AI 是人工智慧","生成式 AI 可產生內容"],"top_n":2}' \
-  http://localhost:8000/rerank | jq
+  http://localhost:9800/rerank | jq
 
 # /graph/probe（輕量探測，不驗 schema）
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"model":"graph-extractor","strict_json":true}' \
-  http://localhost:8000/graph/probe | jq
+  http://localhost:9800/graph/probe | jq
 ```
 
 ## Graph Schema
