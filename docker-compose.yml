@@ -180,6 +180,7 @@ services:
         condition: service_healthy
     environment:
       <<: *common-env
+      APP_VERSION: ${APP_VERSION:-v0.1.0}
       LITELLM_BASE: http://litellm:4000/v1
       LITELLM_KEY: ${LITELLM_KEY:-sk-admin}
       OLLAMA_BASE: http://ollama:11434

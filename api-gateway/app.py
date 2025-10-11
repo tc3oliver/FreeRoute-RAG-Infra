@@ -38,6 +38,9 @@ ENV_PROVIDER_CHAIN = [
 ]
 PROVIDER_CHAIN = ENV_PROVIDER_CHAIN if ENV_PROVIDER_CHAIN else DEFAULT_PROVIDER_CHAIN
 
+# 版本：預設對齊 git tag，如需覆寫可設 APP_VERSION
+APP_VERSION = os.environ.get("APP_VERSION", "v0.1.0")
+
 client = OpenAI(base_url=LITELLM_BASE, api_key=LITELLM_KEY)
 
 
@@ -68,7 +71,7 @@ with open(GRAPH_SCHEMA_PATH, "rb") as _f:
 # ─────────────────────────────────────────────────────────
 # FastAPI
 # ─────────────────────────────────────────────────────────
-app = FastAPI(title="FreeRoute RAG Infra – API Gateway", version="2.2.0")
+app = FastAPI(title="FreeRoute RAG Infra – API Gateway", version=APP_VERSION)
 
 
 # ── 安全：API Key 驗證 ──
@@ -350,6 +353,7 @@ def health():
 @app.get("/whoami", dependencies=[Depends(require_key)])
 def whoami():
     return {
+        "app_version": APP_VERSION,
         "litellm_base": LITELLM_BASE,
         "entrypoints": sorted(list(ENTRYPOINTS)),
         "json_mode_hint_injection": True,
@@ -363,6 +367,12 @@ def whoami():
             "provider_chain": PROVIDER_CHAIN,
         },
     }
+
+
+# 簡易版本查詢端點
+@app.get("/version")
+def version():
+    return {"version": APP_VERSION}
 
 
 # ── Chat ──

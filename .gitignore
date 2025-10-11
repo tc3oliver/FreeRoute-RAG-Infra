@@ -30,3 +30,4 @@ Thumbs.db
 models/
 **/reranker_models/
 **/ollama_models/
+ROADMAP.md
