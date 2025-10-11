@@ -82,12 +82,12 @@ services:
       - ./litellm.config.yaml:/app/config.yaml:ro
       - ./plugins:/app/plugins:ro
     command: ["--config","/app/config.yaml"]
-    ports: ["4000:4000"]
-    # healthcheck:
-    #   test: ["CMD-SHELL", "python - <<'PY'\nimport urllib.request,sys\nu='http://localhost:4000/health'\ntry:\n  urllib.request.urlopen(u, timeout=3)\n  sys.exit(0)\nexcept Exception:\n  sys.exit(1)\nPY"]
-    #   interval: 5s
-    #   timeout: 5s
-    #   retries: 40
+    ports: ["9400:4000"]
+    healthcheck:
+      test: ["CMD-SHELL", "python - <<'PY'\nimport urllib.request,sys\nu='http://localhost:4000/test'\ntry:\n  urllib.request.urlopen(u, timeout=3)\n  sys.exit(0)\nexcept Exception:\n  sys.exit(1)\nPY"]
+      interval: 10s
+      timeout: 5s
+      retries: 40
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────
@@ -107,7 +107,7 @@ services:
         ollama serve & sleep 6 && \
         ollama pull bge-m3 && \
         tail -f /dev/null
-    ports: ["11434:11434"]
+    ports: ["9143:11434"]
     volumes: [ollama_models:/root/.ollama]
     deploy:
       resources:
@@ -151,7 +151,7 @@ services:
     volumes:
       - ./pyreranker:/app
       - reranker_models:/models
-    ports: ["8080:8080"]
+    ports: ["9080:8080"]
     deploy:
       resources:
         reservations:
@@ -172,8 +172,8 @@ services:
   apigw:
     build: ./api-gateway
     depends_on:
-      # litellm:
-      #   condition: service_healthy    # CHG: 等 litellm 健康
+      litellm:
+        condition: service_healthy    # CHG: 等 litellm 健康
       ollama:
         condition: service_healthy
       reranker:
@@ -185,7 +185,7 @@ services:
       LITELLM_KEY: ${LITELLM_KEY:-sk-admin}
       OLLAMA_BASE: http://ollama:11434
       RERANKER_URL: http://reranker:8080
-    ports: ["8000:8000"]
+    ports: ["9800:8000"]
     healthcheck:
       test: ["CMD-SHELL", "python - <<'PY'\nimport urllib.request,sys\nu='http://localhost:8000/health'\ntry:\n  urllib.request.urlopen(u, timeout=3)\n  sys.exit(0)\nexcept Exception:\n  sys.exit(1)\nPY"]
       interval: 5s
