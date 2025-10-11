@@ -78,9 +78,9 @@ services:
       GROQ_API_KEY: ${GROQ_API_KEY}
       GRAPH_SCHEMA_PATH: /app/schemas/graph_schema.json
     volumes:
-      - ./api-gateway/graph_schema.json:/app/schemas/graph_schema.json:ro
-      - ./litellm.config.yaml:/app/config.yaml:ro
-      - ./plugins:/app/plugins:ro
+      - ./schemas/graph_schema.json:/app/schemas/graph_schema.json:ro
+      - ./configs/litellm.config.yaml:/app/config.yaml:ro
+      - ./integrations/litellm/plugins:/app/plugins:ro
     command: ["--config","/app/config.yaml"]
     ports: ["9400:4000"]
     healthcheck:
@@ -127,15 +127,9 @@ services:
   # 本地重排：PyTorch 版（支援 CUDA 12.x）
   # ─────────────────────────────────────────────────────────
   reranker:
-    image: pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
-    command:
-      - bash
-      - -lc
-      - |
-        pip install --no-cache-dir -U \
-          "transformers>=4.44" "accelerate>=0.33" "sentence-transformers>=3.0" \
-          "uvicorn>=0.30" "fastapi>=0.115" && \
-        python -u /app/server.py
+    build:
+      context: .
+      dockerfile: containers/reranker/Dockerfile
     environment:
       <<: *common-env
       TRANSFORMERS_CACHE: /models
@@ -149,7 +143,6 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     shm_size: "2g"
     volumes:
-      - ./pyreranker:/app
       - reranker_models:/models
     ports: ["9080:8080"]
     deploy:
@@ -170,7 +163,9 @@ services:
   # API Gateway：你的系統對外只需打這層
   # ─────────────────────────────────────────────────────────
   apigw:
-    build: ./api-gateway
+    build:
+      context: .
+      dockerfile: containers/gateway/Dockerfile
     depends_on:
       litellm:
         condition: service_healthy    # CHG: 等 litellm 健康
@@ -185,7 +180,10 @@ services:
       LITELLM_KEY: ${LITELLM_KEY:-sk-admin}
       OLLAMA_BASE: http://ollama:11434
       RERANKER_URL: http://reranker:8080
+      GRAPH_SCHEMA_PATH: /app/schemas/graph_schema.json
     ports: ["9800:8000"]
+    volumes:
+      - ./schemas/graph_schema.json:/app/schemas/graph_schema.json:ro
     healthcheck:
       test: ["CMD-SHELL", "python - <<'PY'\nimport urllib.request,sys\nu='http://localhost:8000/health'\ntry:\n  urllib.request.urlopen(u, timeout=3)\n  sys.exit(0)\nexcept Exception:\n  sys.exit(1)\nPY"]
       interval: 5s

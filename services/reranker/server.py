@@ -19,7 +19,6 @@ if DEVICE_ENV == "auto":
 else:
     device = DEVICE_ENV
 
-# 選 dtype：bfloat16 -> torch.bfloat16；float16 -> torch.float16；預設 float32
 dtype_map = {
     "bf16": torch.bfloat16,
     "bfloat16": torch.bfloat16,
@@ -54,7 +53,6 @@ def health():
 @app.post("/rerank")
 def rerank(req: RerankReq):
     pairs = [(req.query, d) for d in req.documents]
-    # 依模型預處理，限制長度避免 OOM
     enc = tok.batch_encode_plus(
         pairs, padding=True, truncation=True, max_length=TOKEN_MAXLEN, return_tensors="pt"
     ).to(device)
@@ -63,11 +61,9 @@ def rerank(req: RerankReq):
         logits = model(**enc).logits.squeeze(-1)
         scores = logits.detach().float().tolist()
 
-    # 排序取前 top_n
     ranked = sorted(list(enumerate(scores)), key=lambda x: x[1], reverse=True)[: req.top_n]
     return {"ok": True, "results": [{"index": i, "score": float(s)} for i, s in ranked]}
 
 
 if __name__ == "__main__":
-    # 維持 TEI 類似的 8080 端口
     uvicorn.run(app, host="0.0.0.0", port=8080)

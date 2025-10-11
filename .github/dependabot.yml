@@ -16,7 +16,7 @@ updates:
 
   # API Gateway Python deps
   - package-ecosystem: pip
-    directory: "/api-gateway"
+    directory: "/services/gateway"
     schedule:
       interval: weekly
     labels: ["dependencies", "python"]

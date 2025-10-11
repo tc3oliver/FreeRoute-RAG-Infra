@@ -33,22 +33,10 @@ jobs:
           ruff --version
           ruff check .
 
-      - name: Smoke tests (scripts)
+      - name: Test discovery (no execute)
         run: |
           python --version
-          # Ensure test scripts import and show help without running services
-          python - <<'PY'
-          import importlib.util, sys
-          for f in ['test_models.py','test_gateway.py']:
-              spec = importlib.util.spec_from_file_location('tmp_mod', f)
-              mod = importlib.util.module_from_spec(spec)
-              try:
-                  spec.loader.exec_module(mod)
-                  print(f"Loaded {f} OK")
-              except Exception as e:
-                  print(f"WARNING: {f} import failed: {e}")
-          print('Smoke OK')
-          PY
+          pytest -q --collect-only tests || true
 
   docker-build:
     name: Build Docker images
@@ -65,8 +53,8 @@ jobs:
       - name: Build API Gateway image
         uses: docker/build-push-action@v6
         with:
-          context: ./api-gateway
-          file: ./api-gateway/Dockerfile
+          context: .
+          file: ./containers/gateway/Dockerfile
           push: false
           load: false
 

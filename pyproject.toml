@@ -20,4 +20,4 @@ exclude = '''
 profile = "black"
 line_length = 100
 multi_line_output = 3
-src_paths = ["api-gateway", "plugins", "pyreranker"]
+src_paths = ["services/gateway", "services/reranker", "integrations"]

@@ -192,7 +192,7 @@ API Gateway 補充環境變數：
 - LITELLM_BASE（預設 http://litellm:4000/v1）：Gateway 代理至 LiteLLM 的 Base URL
 - LITELLM_KEY（預設 sk-admin）：Gateway 代理用的管理金鑰
 - RERANKER_URL（預設 http://reranker:8080；若未設，程式預設 80）：重排服務 URL
-- GRAPH_SCHEMA_PATH（預設 `api-gateway/graph_schema.json`）：Gateway 與 TokenCap 共用
+- GRAPH_SCHEMA_PATH（預設 `/app/schemas/graph_schema.json`）：Gateway 與 TokenCap 共用（由 `./schemas/graph_schema.json` 掛載）
 - GRAPH_MIN_NODES / GRAPH_MIN_EDGES（預設 1 / 1）：/graph/extract 最小門檻
 - GRAPH_ALLOW_EMPTY（預設 false）：是否允許空結果通過
 - GRAPH_MAX_ATTEMPTS（預設 2）：每個 provider 嘗試次數（strict → nudge）
@@ -355,7 +355,8 @@ curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
 
 ## Graph Schema
 
-- 路徑：`api-gateway/graph_schema.json`
+- Repo 路徑：`schemas/graph_schema.json`
+- 容器路徑：`/app/schemas/graph_schema.json`（由 docker-compose 掛載）
 - 頂層結構：
 
 ```json
@@ -404,54 +405,11 @@ Reranker（bge-reranker-v2-m3）
 
 ## 測試
 
-在專案根目錄：
+使用 pytest 執行整合測試（需先啟動 docker-compose）：
 
 ```bash
-python test_models.py
-python test_gateway.py
-```
-
-啟動後快速測試說明：
-
-- LiteLLM 連通性與模型入口檢查（test_models.py）
-  - 會對 rag-answer、graph-extractor*、local-embed 進行基本呼叫
-  - 可用環境變數覆寫預設值：
-    - LITELLM_BASE（預設 http://localhost:4000/v1）
-    - LITELLM_KEY（預設 sk-admin）
-  - 範例：
-
-```bash
-# 基本連通測試（預設直連 http://localhost:4000/v1，以 sk-admin 測試）
-python test_models.py
-
-# 僅在 Graph 測試對 OpenAI 相容端開啟嚴格 JSON 驗證
-python test_models.py --strict-json
-```
-
-- API Gateway 端對外路由檢查（test_gateway.py）
-  - 會依序呼叫 /health、/whoami、/chat、/embed、/rerank、/graph/extract（可選略 graph）
-  - 可用環境變數覆寫預設值：
-    - API_GATEWAY_BASE（預設 http://localhost:8000）
-    - API_GATEWAY_KEY（預設 dev-key）
-    - API_GATEWAY_AUTH_HEADER（預設 X-API-Key，可改 Authorization）
-  - 常用參數：
-    - --only health|whoami|chat|embed|rerank|graph（只跑單一測試）
-    - --skip-graph（略過 /graph/extract 測試）
-    - --auth-header X-API-Key|Authorization（切換驗證標頭）
-  - 範例：
-
-```bash
-# 跑完整測試（使用預設 BASE/KEY）
-python test_gateway.py
-
-# 只測 /health
-python test_gateway.py --only health
-
-# 使用 Authorization: Bearer <key> 模式測試 /chat
-API_GATEWAY_KEY=dev-key python test_gateway.py --only chat --auth-header Authorization
-
-# 略過 /graph/extract 測試（其餘全部跑）
-python test_gateway.py --skip-graph
+pytest -q tests/gateway
+pytest -q tests/reranker
 ```
 
 ## 疑難排解
@@ -475,7 +433,7 @@ JSON 模式錯誤：
 
 Graph 抽取空內容/非法 JSON：
 
-- Gateway 會嘗試修正與正規化，仍失敗回 422 並附 provider 嘗試清單。確認 `api-gateway/graph_schema.json` 有效。
+- Gateway 會嘗試修正與正規化，仍失敗回 422 並附 provider 嘗試清單。確認 `schemas/graph_schema.json` 有效。
 
 已達 TPD 仍走 OpenAI：
 
@@ -485,20 +443,30 @@ Graph 抽取空內容/非法 JSON：
 
 ```
 .
-├─ api-gateway/
-│  ├─ app.py                 # Gateway 主程式：/chat /embed /rerank /graph/extract
-│  ├─ graph_schema.json      # Graph JSON Schema（單一真相）
-│  └─ requirements.txt
+├─ services/
+│  ├─ gateway/               # API Gateway（FastAPI）
+│  │  ├─ app.py
+│  │  └─ requirements.txt
+│  └─ reranker/              # PyTorch Reranker（FastAPI）
+│     └─ server.py
+├─ integrations/
+│  └─ litellm/
+│     └─ plugins/
+│        └─ token_cap.py     # TokenCap：TPD + 改道 + Schema 注入
 ├─ containers/
+│  ├─ gateway/Dockerfile     # Gateway 容器
 │  └─ litellm/Dockerfile     # LiteLLM 容器
-├─ plugins/
-│  └─ token_cap.py           # TokenCap：TPD + 改道 + Schema 注入
-├─ pyreranker/
-│  └─ server.py              # Reranker API（bge-reranker-v2-m3）
-├─ litellm.config.yaml       # 模型入口與路由策略
+├─ schemas/
+│  └─ graph_schema.json      # Graph JSON Schema（掛載到 /app/schemas）
+├─ configs/
+│  └─ litellm.config.yaml    # 模型入口與路由策略
+├─ tests/
+│  ├─ gateway/test_gateway.py
+│  └─ reranker/test_reranker.py
 ├─ docker-compose.yml        # 一鍵部署
-├─ test_gateway.py           # Gateway 測試
-└─ test_models.py            # LiteLLM 測試
+├─ pyproject.toml
+├─ README.md / README.zh-TW.md / ROADMAP.md
+└─ ...
 ```
 
 ## 授權

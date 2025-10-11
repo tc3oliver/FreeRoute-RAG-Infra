@@ -14,15 +14,11 @@ except Exception:
 
 import redis.asyncio as redis
 
-# ─────────────────────────────────────────────────────────
-# 環境變數
-# ─────────────────────────────────────────────────────────
 OPENAI_TPD_LIMIT = int(os.getenv("OPENAI_TPD_LIMIT", "10000000"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 TZ_OFFSET_HOURS = int(os.getenv("TZ_OFFSET_HOURS", "8"))
 GRAPH_SCHEMA_PATH = os.getenv("GRAPH_SCHEMA_PATH", "/app/schemas/graph_schema.json")
 
-# 入口名與改道路由（僅針對「入口名」生效）
 OPENAI_ENTRYPOINTS_EXACT = {"rag-answer", "graph-extractor"}
 OPENAI_ENTRYPOINTS_PREFIX = ("graph-extractor",)
 
@@ -38,7 +34,6 @@ REROUTE_MAP = {
 DEFAULT_GRAPH_REROUTE = "graph-extractor-gemini"
 DEFAULT_RAG_REROUTE = "rag-answer-gemini"
 
-# 用來辨識「真實 OpenAI 模型名」→ 直接 429（禁止繞付費名）
 _OPENAI_NAME_PREFIXES = (
     "openai/",
     "gpt-",
@@ -56,9 +51,6 @@ _OPENAI_NAME_EXACT = {
 }
 
 
-# ─────────────────────────────────────────────────────────
-# 共用工具
-# ─────────────────────────────────────────────────────────
 def is_openai_model_name(name: str) -> bool:
     if not name:
         return False
@@ -88,10 +80,6 @@ def _today_key(prefix: str) -> str:
 
 
 def _load_graph_schema(path: str) -> dict:
-    """
-    Fail-Fast：讀不到或結構不合理即 raise，讓容器啟動失敗，避免 Schema 漂移。
-    為了避免在 litellm 容器內要求安裝 jsonschema，這裡做「基本結構」檢查即可。
-    """
     if not os.path.exists(path):
         raise RuntimeError(f"[FATAL][TokenCap] graph_schema.json not found at: {path}")
     try:
@@ -100,7 +88,6 @@ def _load_graph_schema(path: str) -> dict:
     except Exception as e:
         raise RuntimeError(f"[FATAL][TokenCap] graph_schema.json load failed: {e}")
 
-    # 基礎檢查：必須是物件、具有 type/properties/required，且至少包含 nodes/edges
     if not isinstance(schema, dict):
         raise RuntimeError("[FATAL][TokenCap] graph_schema.json invalid: not an object")
 
@@ -128,11 +115,6 @@ def _load_graph_schema(path: str) -> dict:
 
 
 def _looks_like_graph_call(data: dict) -> bool:
-    """
-    粗判定：這次 chat 是否是「圖譜抽取」任務
-    條件一：response_format 是 json_schema，且 schema 包含 nodes/edges
-    條件二（備援）：messages 內文含 nodes/edges/圖譜/節點/關係 等關鍵字
-    """
     try:
         rf = data.get("response_format") or {}
         if isinstance(rf, dict) and rf.get("type") == "json_schema":
@@ -158,13 +140,9 @@ def _looks_like_graph_call(data: dict) -> bool:
     return False
 
 
-# 在匯入時就讀檔（Fail-Fast）
 GRAPH_JSON_SCHEMA = _load_graph_schema(GRAPH_SCHEMA_PATH)
 
 
-# ─────────────────────────────────────────────────────────
-# TokenCap 實作
-# ─────────────────────────────────────────────────────────
 class TokenCap(CustomLogger):
     def __init__(self):
         self._r = None
@@ -187,9 +165,8 @@ class TokenCap(CustomLogger):
             "moderation",
             "audio_transcription",
         ],
-        **kwargs,  # e.g. request_data
+        **kwargs,
     ):
-        # ---- 跳過 /health、缺 model 的請求 ----
         path = ""
         req = kwargs.get("request_data")
         try:
@@ -206,21 +183,17 @@ class TokenCap(CustomLogger):
         model = data.get("model") or ""
         print("[TokenCap] pre model =", model)
 
-        # ---- OpenAI TPD 檢查（UTC+8 按日）----
         r = await self._redis()
         tpd_key = _today_key("tpd:openai")
         used = int(await r.get(tpd_key) or 0)
 
         if used >= OPENAI_TPD_LIMIT:
-            # 允許多跳 reroute，直到不是 OpenAI（或達到安全上限）
             hops = 0
             MAX_HOPS = 3
 
             def _needs_reroute(m: str) -> bool:
-                # 入口名屬於 graph-extractor* / rag-answer* 等（OpenAI 入口）→ 需要改道
                 if is_openai_entrypoint(m):
                     return True
-                # 真實 OpenAI 型號也需要改道（若開啟 OPENAI_REROUTE_REAL）
                 if OPENAI_REROUTE_REAL and (
                     m.lower().startswith("openai/") or is_openai_model_name(m)
                 ):
@@ -228,18 +201,15 @@ class TokenCap(CustomLogger):
                 return False
 
             while _needs_reroute(model) and hops < MAX_HOPS:
-                # 入口名：用路由表；真實型號：依任務型態選預設改道
                 if is_openai_entrypoint(model):
                     new_model = pick_reroute(model)
                 else:
-                    # 真實 OpenAI 型號：圖抽取 → graph；否則 → rag
                     new_model = (
                         DEFAULT_GRAPH_REROUTE
                         if _looks_like_graph_call(data)
                         else DEFAULT_RAG_REROUTE
                     )
 
-                # 若沒變化就中止（避免死循環）
                 if not new_model or new_model == model:
                     break
 
@@ -248,7 +218,6 @@ class TokenCap(CustomLogger):
                 hops += 1
                 print(f"[TokenCap] reroute(hop {hops}) ->", new_model)
 
-            # 多跳後仍是 OpenAI 且不允許改道 → 429
             if (
                 model.lower().startswith("openai/") or is_openai_model_name(model)
             ) and not OPENAI_REROUTE_REAL:
@@ -258,11 +227,9 @@ class TokenCap(CustomLogger):
                     status_code=429, detail={"error": "OpenAI daily token cap reached"}
                 )
 
-        # ---- Graph 入口：強制 JSON Schema 回覆（跨供應商）----
         if is_openai_entrypoint(model) and any(
             model.startswith(p) for p in OPENAI_ENTRYPOINTS_PREFIX
         ):
-            # 設定 JSON Schema（由本檔讀取）
             data.setdefault(
                 "response_format",
                 {
@@ -270,20 +237,16 @@ class TokenCap(CustomLogger):
                     "json_schema": {"name": "graph", "schema": GRAPH_JSON_SCHEMA, "strict": True},
                 },
             )
-            # 生成設定
             data["temperature"] = 0
 
-            # Gemini 的 JSON MIME 放在 extra_body，OpenAI 看不到
             if model.startswith("gemini/"):
                 data.setdefault("extra_body", {}).setdefault(
                     "response_mime_type", "application/json"
                 )
 
-            # 移除會造成特定供應商 400 的鍵
             for k in ("generation_config", "max_output_tokens", "response_mime_type"):
                 data.pop(k, None)
 
-            # 訊息內若沒有任何包含 "json" 的文字，補上最小 system 提示
             if isinstance(data.get("messages"), list):
                 msgs = data["messages"]
                 has_json_word = False
@@ -307,9 +270,6 @@ class TokenCap(CustomLogger):
         return data
 
     async def async_post_call_success_hook(self, *args, **kwargs):
-        """
-        成功回來才記帳；且只記 OpenAI 的使用量。
-        """
         try:
             response = args[2] if len(args) >= 3 else kwargs.get("response")
             model = getattr(response, "model", "") or ""
@@ -328,14 +288,12 @@ class TokenCap(CustomLogger):
                 key = _today_key("tpd:openai")
                 p = r.pipeline()
                 p.incrby(key, total)
-                p.expire(key, 60 * 60 * 36)  # 保留 36h
+                p.expire(key, 60 * 60 * 36)
                 await p.execute()
         except Exception:
-            # 靜默忽略，避免非阻斷錯誤
             return
 
     async def async_post_call_failure_hook(self, *args, **kwargs):
-        # 忽略所有失敗回呼，避免 /health 或第三方差異造成的噪音
         return
 
 

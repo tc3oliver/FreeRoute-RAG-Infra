@@ -10,7 +10,7 @@ Thanks for your interest! For small issues and typos, feel free to open a PR dir
 ## Development tips
 
 - Use docker compose up -d --build to start services.
-- test_models.py checks LiteLLM entries; test_gateway.py checks the Gateway endpoints.
+- tests/ 目錄包含最小的 smoke 測試（gateway 與 reranker 健康檢查）。
 - For GPU issues, see Troubleshooting in README.
 
 ## Pre-commit hooks (ruff/black/isort)
@@ -58,7 +58,7 @@ Versioning guideline:
 ## Dependabot
 
 Dependency updates are automated via .github/dependabot.yml.
-- Schedules weekly checks for GitHub Actions, pip (root and api-gateway), and Dockerfiles.
+- Schedules weekly checks for GitHub Actions, pip (root and services/gateway), and Dockerfiles.
 - PRs will be labeled with dependencies category.
 
 ## Commit messages & PRs

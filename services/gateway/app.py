@@ -10,9 +10,7 @@ from jsonschema import Draft202012Validator, validate
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-# ─────────────────────────────────────────────────────────
 # 環境變數
-# ─────────────────────────────────────────────────────────
 LITELLM_BASE = os.environ.get("LITELLM_BASE", "http://litellm:4000/v1").rstrip("/")
 LITELLM_KEY = os.environ.get("LITELLM_KEY", "sk-admin")
 RERANKER_URL = os.environ.get("RERANKER_URL", "http://reranker:80")
@@ -20,16 +18,14 @@ RERANKER_URL = os.environ.get("RERANKER_URL", "http://reranker:80")
 API_KEYS = {
     k.strip() for k in os.environ.get("API_GATEWAY_KEYS", "dev-key").split(",") if k.strip()
 }
-GRAPH_SCHEMA_PATH = os.environ.get(
-    "GRAPH_SCHEMA_PATH", os.path.join(os.path.dirname(__file__), "graph_schema.json")
-)
+# 統一路徑：容器內掛載到 /app/schemas/graph_schema.json
+GRAPH_SCHEMA_PATH = os.environ.get("GRAPH_SCHEMA_PATH", "/app/schemas/graph_schema.json")
 
-# Graph 工作流參數（可環境覆蓋）
+# Graph 工作流程參數（可環境覆蓋）
 GRAPH_MIN_NODES = int(os.environ.get("GRAPH_MIN_NODES", "1"))
 GRAPH_MIN_EDGES = int(os.environ.get("GRAPH_MIN_EDGES", "1"))
 GRAPH_ALLOW_EMPTY = os.environ.get("GRAPH_ALLOW_EMPTY", "false").lower() == "true"
 GRAPH_MAX_ATTEMPTS = int(os.environ.get("GRAPH_MAX_ATTEMPTS", "2"))
-# 預設鏈：你目前 config 有 graph-extractor / graph-extractor-gemini / graph-extractor-o1mini
 DEFAULT_PROVIDER_CHAIN = ["graph-extractor", "graph-extractor-o1mini", "graph-extractor-gemini"]
 ENV_PROVIDER_CHAIN = [
     x.strip()
@@ -38,15 +34,11 @@ ENV_PROVIDER_CHAIN = [
 ]
 PROVIDER_CHAIN = ENV_PROVIDER_CHAIN if ENV_PROVIDER_CHAIN else DEFAULT_PROVIDER_CHAIN
 
-# 版本：預設對齊 git tag，如需覆寫可設 APP_VERSION
 APP_VERSION = os.environ.get("APP_VERSION", "v0.1.0")
 
 client = OpenAI(base_url=LITELLM_BASE, api_key=LITELLM_KEY)
 
 
-# ─────────────────────────────────────────────────────────
-# 讀取 Graph Schema（讀不到或非法直接終止）
-# ─────────────────────────────────────────────────────────
 def _load_graph_schema(path: str) -> Dict[str, Any]:
     if not os.path.exists(path):
         raise RuntimeError(f"[FATAL] graph_schema.json not found at: {path}")
@@ -68,13 +60,9 @@ GRAPH_JSON_SCHEMA = _load_graph_schema(GRAPH_SCHEMA_PATH)
 with open(GRAPH_SCHEMA_PATH, "rb") as _f:
     GRAPH_SCHEMA_HASH = hashlib.sha256(_f.read()).hexdigest()
 
-# ─────────────────────────────────────────────────────────
-# FastAPI
-# ─────────────────────────────────────────────────────────
 app = FastAPI(title="FreeRoute RAG Infra – API Gateway", version=APP_VERSION)
 
 
-# ── 安全：API Key 驗證 ──
 def require_key(
     x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)
 ):
@@ -88,12 +76,11 @@ def require_key(
     return True
 
 
-# ── 請求資料模型 ──
 class ChatReq(BaseModel):
     messages: List[Dict[str, str]] = Field(..., description="OpenAI chat messages")
     model: Optional[str] = Field(None, description="建議留空或使用入口名")
     temperature: float = 0.2
-    json_mode: bool = False  # 預設 False
+    json_mode: bool = False
 
 
 class EmbedReq(BaseModel):
@@ -110,7 +97,6 @@ class GraphReq(BaseModel):
     context: str
     strict: bool = True
     repair_if_invalid: bool = True
-    # 可選參數（不宣告在模型也能從環境拿；此處提供顯式欄位方便直傳覆蓋）
     min_nodes: Optional[int] = None
     min_edges: Optional[int] = None
     allow_empty: Optional[bool] = None
@@ -126,8 +112,7 @@ class GraphProbeReq(BaseModel):
     messages: Optional[List[Dict[str, str]]] = None
 
 
-# ── 工具 ──
-ENTRYPOINTS = {"rag-answer", "graph-extractor"}  # 對外可選入口名
+ENTRYPOINTS = {"rag-answer", "graph-extractor"}
 DEFAULTS = {"chat": "rag-answer", "graph": "graph-extractor"}
 
 
@@ -149,10 +134,6 @@ def _retry_once_429(func, *args, **kwargs):
 
 
 def _ensure_json_hint(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    """
-    若 messages 內不存在 'json'/'JSON' 字樣，補上一則 system 提示，避免上游代理在 json_mode 執行時拒絕。
-    """
-
     def _has_json_word(msgs):
         for m in msgs:
             if isinstance(m, dict):
@@ -168,16 +149,9 @@ def _ensure_json_hint(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
 
 
 def _extract_json_obj(text: str) -> Dict[str, Any]:
-    """
-    寬鬆 JSON 擷取：移除 code fence，從第一個 '{' 到匹配 '}' 嘗試解析。
-    失敗則拋 ValueError。
-    """
     t = (text or "").strip()
-    # 粗略移除 ```...```（含 ```json 標記）
     if t.startswith("```"):
-        # 刪除所有反引號，保留文字
         t = t.replace("```json", "").replace("```JSON", "").replace("```", "").strip()
-    # 尋找第一個 '{' 與最後一個 '}'
     start = t.find("{")
     end = t.rfind("}")
     if start == -1 or end == -1 or end <= start:
@@ -186,7 +160,6 @@ def _extract_json_obj(text: str) -> Dict[str, Any]:
     try:
         return json.loads(snippet)
     except Exception:
-        # 再做一次逐字平衡
         brace = 0
         for i, ch in enumerate(t[start:]):
             if ch == "{":
@@ -199,12 +172,6 @@ def _extract_json_obj(text: str) -> Dict[str, Any]:
 
 
 def _kvize(obj: Any) -> List[Dict[str, Any]]:
-    """
-    將 props 轉為 KV 陣列：
-    - 若是 dict  => [{"key":k,"value":v},...]
-    - 若是 list  => 篩掉不合規者，保留已是 KV 物件的
-    - 其它 / None => []
-    """
     if obj is None:
         return []
     if isinstance(obj, dict):
@@ -226,7 +193,6 @@ def _dedup_merge_nodes(nodes):
     for n in nodes:
         k = n["id"]
         if k in by_id:
-            # 合併 props（去重 key）
             seen = {
                 (p["key"], json.dumps(p["value"], ensure_ascii=False)) for p in by_id[k]["props"]
             }
@@ -241,36 +207,24 @@ def _dedup_merge_nodes(nodes):
 
 
 def _normalize_graph_shape(data: Any) -> Dict[str, Any]:
-    """
-    把 model 回來的多種變體正規化為：{"nodes":[{id,type,props:KV[]}], "edges":[{src,dst,type,props:KV[]}]}
-    可處理：
-    - 頂層是 list（視為 nodes），或頂層是物件但只有 nodes/edges 其中之一
-    - 節點用 label 而非 type
-    - 關係用 source/target/label 而非 src/dst/type
-    - props 是 dict 而不是 KV 陣列
-    """
     nodes, edges = [], []
 
-    # 頂層 list => 當作 nodes；頂層 dict => 嘗試讀 nodes/edges
     if isinstance(data, list):
         raw_nodes = data
         raw_edges = []
     elif isinstance(data, dict):
         raw_nodes = data.get("nodes", [])
         raw_edges = data.get("edges", [])
-        # 如果沒有 nodes 但看起來就是節點陣列
         if not raw_nodes and isinstance(data.get("items"), list):
             raw_nodes = data["items"]
     else:
         raw_nodes, raw_edges = [], []
 
-    # 正規化 nodes
     if isinstance(raw_nodes, list):
         for n in raw_nodes:
             if not isinstance(n, dict):
                 continue
             nid = n.get("id") or n.get("name") or n.get("node_id") or ""
-            # 這行改成同時考慮 labels[]
             ntype = (
                 n.get("type")
                 or n.get("label")
@@ -287,7 +241,6 @@ def _normalize_graph_shape(data: Any) -> Dict[str, Any]:
             if isinstance(nid, str) and isinstance(ntype, str) and nid:
                 nodes.append({"id": nid, "type": ntype, "props": props})
 
-    # 正規化 edges
     if isinstance(raw_edges, list):
         for e in raw_edges:
             if not isinstance(e, dict):
@@ -300,15 +253,10 @@ def _normalize_graph_shape(data: Any) -> Dict[str, Any]:
                 edges.append({"src": src, "dst": dst, "type": etype, "props": props})
 
     nodes = _dedup_merge_nodes(nodes)
-
     return {"nodes": nodes, "edges": edges}
 
 
 def _is_single_error_node(d: Dict[str, Any]) -> bool:
-    """
-    若返回為「只有一個節點且 type=error、edges 為 list」則視為失敗樣式，
-    即使 allow_empty=true 也不當成功（避免把錯誤訊息包成圖結果）。
-    """
     try:
         if not isinstance(d, dict):
             return False
@@ -344,7 +292,6 @@ def _prune_graph(data):
     return data
 
 
-# ── 健康與工具 ──
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -369,13 +316,11 @@ def whoami():
     }
 
 
-# 簡易版本查詢端點
 @app.get("/version")
 def version():
     return {"version": APP_VERSION}
 
 
-# ── Chat ──
 @app.post("/chat", dependencies=[Depends(require_key)])
 def chat(req: ChatReq, request: Request):
     model = _normalize_model(req.model, kind="chat")
@@ -410,7 +355,6 @@ def chat(req: ChatReq, request: Request):
         return {"ok": True, "data": out, "meta": meta}
 
 
-# ── Embeddings（Ollama bge-m3 經 LiteLLM 的 "local-embed"） ──
 @app.post("/embed", dependencies=[Depends(require_key)])
 def embed(req: EmbedReq):
     try:
@@ -421,7 +365,6 @@ def embed(req: EmbedReq):
         raise HTTPException(status_code=502, detail=f"embed_error: {e}")
 
 
-# ── Rerank（TEI） ──
 @app.post("/rerank", dependencies=[Depends(require_key)])
 def rerank(req: RerankReq):
     try:
@@ -436,7 +379,6 @@ def rerank(req: RerankReq):
         raise HTTPException(status_code=502, detail=f"rerank_error: {e}")
 
 
-# ── Graph Probe（輕量探測：不驗 schema、不修復） ──
 @app.post("/graph/probe", dependencies=[Depends(require_key)])
 def graph_probe(req: GraphProbeReq, request: Request):
     messages = req.messages or [
@@ -502,11 +444,8 @@ def graph_probe(req: GraphProbeReq, request: Request):
         )
 
 
-# ── Graph Extract（嚴格工作流：寬鬆解析 → 修復 → 門檻 → nudge → provider 鏈） ──
-# ── Graph Extract（嚴格工作流：寬鬆解析 → 修復 → 門檻 → nudge → provider 鏈） ──
 @app.post("/graph/extract", dependencies=[Depends(require_key)])
 def graph_extract(req: GraphReq):
-    # 讀取可覆蓋參數（若未給則落回環境預設）
     min_nodes = int(req.min_nodes) if req.min_nodes is not None else GRAPH_MIN_NODES
     min_edges = int(req.min_edges) if req.min_edges is not None else GRAPH_MIN_EDGES
     allow_empty = bool(req.allow_empty) if req.allow_empty is not None else GRAPH_ALLOW_EMPTY
@@ -516,10 +455,9 @@ def graph_extract(req: GraphReq):
     if not req.context or not isinstance(req.context, str) or not req.context.strip():
         raise HTTPException(status_code=400, detail="context must be a non-empty string")
 
-    # 加強版提示：明確要求至少一條關係；給出關係類型與 prop 的示例
     SYS_BASE = (
         "你是資訊抽取引擎，將中文文本轉為圖譜資料（nodes/edges）。"
-        "規則：僅根據【context】抽取，不得捏造；每個節點/關係均需附 props（key/value 列表）。"
+        "規則：僅根據【context】抽取，不得捏造；每個節點/關係需附 props（key/value 列表）。"
         "若資訊不足，可輸出低置信候選，並以 {'key':'low_confidence','value':true} 標記。"
         "必須輸出至少一條關係（例如『就職於/創立/位於』等）。"
         "只輸出 JSON，並嚴格符合系統 Schema。"
@@ -528,18 +466,13 @@ def graph_extract(req: GraphReq):
         "【context】\n{ctx}\n\n"
         "【任務】抽取 nodes/edges，並盡量補充 props（日期/金額/地點/職稱/URL 等）。\n"
         "建議關係類型示例：\n"
-        "- EMPLOYED_AT：props 包含 role（職稱）、start_date（起始時間）、location（地點）\n"
-        "- FOUNDED_BY：props 可含 year（年份）\n"
-        "- HEADQUARTERED_IN：props 可含 city（城市）\n"
+        "- EMPLOYED_AT: props 包含 role（職稱）、start_date（起始時間）、location（地點）\n"
+        "- FOUNDED_BY: props 可含 year（年份）\n"
+        "- HEADQUARTERED_IN: props 可含 city（城市）\n"
         "禁止輸出非 JSON、禁止空白字串、禁止 Markdown。"
     )
 
     def _call_once(entrypoint: str, mode: str) -> Dict[str, Any]:
-        """
-        - 不帶 max_tokens，避免被截斷（finish_reason=length）。
-        - 固定使用 response_format=json_object（避免上游注入 json_schema 導致空輸出）。
-        - 拿到輸出後先 json.loads，失敗就寬鬆擷取，再做形狀正常化，最後做 Schema 驗證。
-        """
         sys_prompt = SYS_BASE
         if mode == "strict":
             sys_prompt += " 回覆不得回傳完全空陣列。"
@@ -550,11 +483,10 @@ def graph_extract(req: GraphReq):
 
         rf = {"type": "json_object"}
         if entrypoint == "graph-extractor-gemini":
-            # 讓 TokenCap 注入 json_schema（不要帶 rf），Gemini 對 schema 服從度高
             rf = None
 
         resp = client.chat.completions.create(
-            model=entrypoint,  # 入口名必經 TokenCap
+            model=entrypoint,
             messages=[
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": user_msg},
@@ -563,17 +495,12 @@ def graph_extract(req: GraphReq):
             **({"response_format": rf} if rf else {}),
         )
 
-        # print("[GraphExtract] DEBUG raw resp:", resp)
-
         raw = resp.choices[0].message.content or ""
-
-        # 先嚴格 loads，再退回寬鬆擷取（處理 ```json ... ``` 與雜訊）
         try:
             obj = json.loads(raw)
         except Exception:
             obj = _extract_json_obj(raw)
 
-        # 先做「形狀正常化」再驗證
         data = _normalize_graph_shape(obj)
 
         if req.strict:
@@ -591,19 +518,15 @@ def graph_extract(req: GraphReq):
 
     for provider in provider_chain:
         print(f"[GraphExtract] trying provider: {provider}")
-
-        # provider 內最多嘗試 max_attempts 次：第 1 次 strict、第 2 次 nudge
         for attempt in range(1, max_attempts + 1):
             mode = "strict" if attempt == 1 else "nudge"
             try:
-                # ★ 修正：把參數交給 _retry_once_429，由它代為呼叫
                 result = _retry_once_429(_call_once, provider, mode)
                 data = result["data"]
                 print(
                     f"[GraphExtract] attempt {attempt} with {provider} ({mode}) produced {len(data.get('nodes', []))} nodes and {len(data.get('edges', []))} edges"
                 )
 
-                # 避免把「單一 error 節點」當成功（即使 allow_empty=true）
                 if _is_single_error_node(data):
                     print(
                         f"[GraphExtract] attempt {attempt} with {provider} ({mode}) produced a single error node"
@@ -651,7 +574,6 @@ def graph_extract(req: GraphReq):
                     )
                     continue
 
-                # 修復（只修 JSON 結構，不改語意）
                 FIX_SYS = (
                     "請把下列輸出修正成『合法 JSON』且符合 Schema；不得改動語意；只回傳 JSON 本體。"
                 )
@@ -715,11 +637,9 @@ def graph_extract(req: GraphReq):
                         }
                     )
 
-        # 換下個 provider
         print(f"[GraphExtract] provider {provider} exhausted all attempts, moving to next if any")
 
     print(f"[GraphExtract] all providers exhausted, total attempts: {len(attempts)}")
-    # 全部失敗
     raise HTTPException(
         status_code=422,
         detail={

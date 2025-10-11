@@ -177,7 +177,7 @@ API Gateway extras:
 - LITELLM_BASE (default http://litellm:4000/v1): Base URL to talk to LiteLLM
 - LITELLM_KEY (default sk-admin): Admin key used by the Gateway when calling LiteLLM
 - RERANKER_URL (default http://reranker:8080; if unset, app defaults to 80): Reranker URL
-- GRAPH_SCHEMA_PATH (default `api-gateway/graph_schema.json`): Shared Graph Schema
+- GRAPH_SCHEMA_PATH (default `/app/schemas/graph_schema.json`): Shared Graph Schema (mounted from `./schemas/graph_schema.json`)
 - GRAPH_MIN_NODES / GRAPH_MIN_EDGES (default 1 / 1): /graph/extract thresholds
 - GRAPH_ALLOW_EMPTY (default false): Allow empty output to pass thresholds
 - GRAPH_MAX_ATTEMPTS (default 2): Attempts per provider (strict → nudge)
@@ -233,7 +233,7 @@ Default policy: Prefer free or low-cost providers. When OpenAI hits daily token 
 
 ## Model entrypoints and routing
 
-Defined in `litellm.config.yaml`.
+Defined in `configs/litellm.config.yaml`.
 
 Chat / inference:
 
@@ -337,7 +337,8 @@ curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
 
 ## Graph Schema
 
-- Path: `api-gateway/graph_schema.json`
+- Repo path: `schemas/graph_schema.json`
+- Container path: `/app/schemas/graph_schema.json` (mounted via docker-compose)
 - Top-level shape:
 
 ```json
@@ -386,54 +387,11 @@ Reranker (bge-reranker-v2-m3)
 
 ## Testing
 
-From the project root:
+Run integration tests with pytest (services must be up):
 
 ```bash
-python test_models.py
-python test_gateway.py
-```
-
-Post-start testing notes:
-
-- LiteLLM connectivity & entrypoints (test_models.py)
-  - Calls rag-answer, graph-extractor*, local-embed
-  - Overridable env vars:
-    - LITELLM_BASE (default http://localhost:4000/v1)
-    - LITELLM_KEY (default sk-admin)
-  - Examples:
-
-```bash
-# Basic connectivity (default base http://localhost:4000/v1, key sk-admin)
-python test_models.py
-
-# Enable strict JSON validation for graph tests
-python test_models.py --strict-json
-```
-
-- API Gateway routes (test_gateway.py)
-  - Calls /health, /whoami, /chat, /embed, /rerank, /graph/extract (graph optional)
-  - Overridable env vars:
-    - API_GATEWAY_BASE (default http://localhost:8000)
-    - API_GATEWAY_KEY (default dev-key)
-    - API_GATEWAY_AUTH_HEADER (default X-API-Key; can switch to Authorization)
-  - Common flags:
-    - --only health|whoami|chat|embed|rerank|graph
-    - --skip-graph
-    - --auth-header X-API-Key|Authorization
-  - Examples:
-
-```bash
-# Full run (using defaults)
-python test_gateway.py
-
-# Only /health
-python test_gateway.py --only health
-
-# Use Authorization: Bearer <key> for /chat
-API_GATEWAY_KEY=dev-key python test_gateway.py --only chat --auth-header Authorization
-
-# Skip /graph/extract, run others
-python test_gateway.py --skip-graph
+pytest -q tests/gateway
+pytest -q tests/reranker
 ```
 
 ## Troubleshooting
@@ -457,7 +415,7 @@ JSON mode issues:
 
 Graph extraction empty/invalid JSON:
 
-- The Gateway attempts to repair/normalize; if still invalid, it returns 422 with attempts included. Ensure `api-gateway/graph_schema.json` is valid.
+- The Gateway attempts to repair/normalize; if still invalid, it returns 422 with attempts included. Ensure `schemas/graph_schema.json` is valid.
 
 OpenAI calls still used after TPD reached:
 
@@ -467,20 +425,30 @@ OpenAI calls still used after TPD reached:
 
 ```
 .
-├─ api-gateway/
-│  ├─ app.py                 # Gateway app: /chat /embed /rerank /graph/extract
-│  ├─ graph_schema.json      # Graph JSON Schema (single source of truth)
-│  └─ requirements.txt
+├─ services/
+│  ├─ gateway/               # API Gateway (FastAPI)
+│  │  ├─ app.py
+│  │  └─ requirements.txt
+│  └─ reranker/              # PyTorch Reranker (FastAPI)
+│     └─ server.py
+├─ integrations/
+│  └─ litellm/
+│     └─ plugins/
+│        └─ token_cap.py     # TokenCap: TPD + reroute + schema injection
 ├─ containers/
+│  ├─ gateway/Dockerfile     # Gateway container
 │  └─ litellm/Dockerfile     # LiteLLM container
-├─ plugins/
-│  └─ token_cap.py           # TokenCap: TPD + reroute + schema injection
-├─ pyreranker/
-│  └─ server.py              # Reranker API (bge-reranker-v2-m3)
-├─ litellm.config.yaml       # Models and routing strategy
+├─ schemas/
+│  └─ graph_schema.json      # Graph JSON Schema (mounted to /app/schemas)
+├─ configs/
+│  └─ litellm.config.yaml    # LiteLLM models and routing strategy
+├─ tests/
+│  ├─ gateway/test_gateway.py
+│  └─ reranker/test_reranker.py
 ├─ docker-compose.yml        # One-command deploy
-├─ test_gateway.py           # Gateway tests
-└─ test_models.py            # LiteLLM tests
+├─ pyproject.toml
+├─ README.md / README.zh-TW.md / ROADMAP.md
+└─ ...
 ```
 
 ## License
