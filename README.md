@@ -102,7 +102,7 @@ flowchart TB
   LITELLM --> GRQ
 ```
 
-Note: LangChain is recommended to connect directly to LiteLLM (4000). Application flows for end users can go through the API Gateway (8000).
+Note: LangChain is recommended to connect directly to LiteLLM (9400). Application flows for end users can go through the API Gateway (9800).
 
 ## Features
 
@@ -140,13 +140,13 @@ docker compose up -d --build
 3) Health checks
 
 ```bash
-curl -s http://localhost:4000/health || curl -s http://localhost:4000/health/readiness | jq
-curl -s http://localhost:8000/health | jq
+curl -s http://localhost:9400/health || curl -s http://localhost:9400/health/readiness | jq
+curl -s http://localhost:9800/health | jq
 ```
 
 4) Dashboard
 
-- URL: http://localhost:4000/ui
+-- URL: http://localhost:9400/ui
 - Default credentials: admin / admin123 (change ASAP)
 
 First run notes:
@@ -193,7 +193,7 @@ Cost protection:
 | Service | Port | Description |
 | --- | ---: | --- |
 | LiteLLM Proxy | 4000 | OpenAI-compatible API (for LangChain/SDK) |
-| Dashboard UI | 4000 | http://localhost:4000/ui |
+| Dashboard UI | 4000 | http://localhost:9400/ui |
 | API Gateway | 8000 | /chat /embed /rerank /graph/extract |
 | Reranker | 8080 | POST /rerank (bge-reranker-v2-m3) |
 | Ollama | 11434 | bge-m3 embeddings |
@@ -380,8 +380,8 @@ Embeddings (Ollama bge-m3)
 
 Reranker (bge-reranker-v2-m3)
 
-- Direct endpoint: `POST http://localhost:8080/rerank`
-- Via Gateway: `POST http://localhost:8000/rerank`
+-- Direct endpoint: `POST http://localhost:9080/rerank`
+-- Via Gateway: `POST http://localhost:9800/rerank`
 - Response: `{"ok": true, "results": [{"index": 1, "score": 0.83, "text": "..."}]}`
 
 ## Testing

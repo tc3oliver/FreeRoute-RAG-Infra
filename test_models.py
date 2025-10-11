@@ -8,7 +8,7 @@ from typing import Tuple
 
 from openai import OpenAI
 
-LITELLM_BASE = os.getenv("LITELLM_BASE", "http://localhost:4000/v1")
+LITELLM_BASE = os.getenv("LITELLM_BASE", "http://localhost:9400/v1")
 LITELLM_KEY = os.getenv("LITELLM_KEY", "sk-admin")
 
 CHAT_MODELS = [

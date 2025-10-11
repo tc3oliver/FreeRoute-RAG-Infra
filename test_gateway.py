@@ -17,7 +17,7 @@ try:
 except Exception:
     HAS_JSONSCHEMA = False
 
-DEFAULT_BASE = os.environ.get("API_GATEWAY_BASE", "http://localhost:8000")
+DEFAULT_BASE = os.environ.get("API_GATEWAY_BASE", "http://localhost:9800")
 DEFAULT_KEY = os.environ.get("API_GATEWAY_KEY", "dev-key")
 DEFAULT_HEADER = os.environ.get("API_GATEWAY_AUTH_HEADER", "X-API-Key")  # or "Authorization"
 

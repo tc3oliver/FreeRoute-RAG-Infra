@@ -89,7 +89,8 @@ litellm_settings:
     port: 6379
     namespace: litellm.cache
     ttl: 600
-    supported_call_types: ["acompletion", "aembedding"]
+    # 支援同步與非同步的 completion/embedding 呼叫，以提高同步路徑的 cache 命中率
+    supported_call_types: ["acompletion", "completion", "aembedding", "embedding"]
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

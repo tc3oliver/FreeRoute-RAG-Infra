@@ -81,7 +81,7 @@ flowchart TB
     FE["Web / API Client"]
   end
 
-  subgraph GATEWAY["API Gateway (8000)"]
+  subgraph GATEWAY["API Gateway (9800)"]
     G1["/chat"]
     G2["/graph/extract"]
     G3["/embed"]
@@ -89,7 +89,7 @@ flowchart TB
   end
 
   subgraph CORE["FreeRoute RAG Infra Core"]
-    subgraph LITELLM["LiteLLM Proxy (4000)"]
+  subgraph LITELLM["LiteLLM Proxy (9400)"]
       TOK["TokenCap"]
       LDB[("Dashboard UI")]
     end
@@ -126,7 +126,7 @@ flowchart TB
   LITELLM --> GRQ
 ```
 
-備註：LangChain 建議直連 LiteLLM（4000）。前端或應用層流程走 API Gateway（8000）。
+備註：LangChain 建議直連 LiteLLM（9400）。前端或應用層流程走 API Gateway（9800）。
 
 ## 需求
 
@@ -155,13 +155,13 @@ docker compose up -d --build
 3) 健康檢查
 
 ```bash
-curl -s http://localhost:4000/health || curl -s http://localhost:4000/health/readiness | jq
-curl -s http://localhost:8000/health | jq
+curl -s http://localhost:9400/health || curl -s http://localhost:9400/health/readiness | jq
+curl -s http://localhost:9800/health | jq
 ```
 
 4) Dashboard
 
-- URL: http://localhost:4000/ui
+-- URL: http://localhost:9400/ui
 - 預設帳密：admin / admin123（請儘速修改）
 
 首次啟動注意事項：
@@ -208,7 +208,7 @@ API Gateway 補充環境變數：
 | 服務 | 埠 | 說明 |
 | --- | ---: | --- |
 | LiteLLM Proxy | 4000 | OpenAI 相容 API（給 LangChain/SDK） |
-| Dashboard UI | 4000 | http://localhost:4000/ui |
+| Dashboard UI | 4000 | http://localhost:9400/ui |
 | API Gateway | 8000 | /chat /embed /rerank /graph/extract |
 | Reranker | 8080 | POST /rerank（bge-reranker-v2-m3） |
 | Ollama | 11434 | bge-m3 embeddings |
@@ -378,7 +378,7 @@ Graph 抽取端點（建議走 Gateway）：
 ```bash
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"context":"Alice 於 2022 年加入 Acme 擔任工程師；Acme 總部在台北，創辦人 Bob。"}' \
-  http://localhost:8000/graph/extract | jq
+  http://localhost:9800/graph/extract | jq
 ```
 
 常用參數：
@@ -398,8 +398,8 @@ Embeddings（Ollama bge-m3）
 
 Reranker（bge-reranker-v2-m3）
 
-- 直接端點：`POST http://localhost:8080/rerank`
-- 經由 Gateway：`POST http://localhost:8000/rerank`
+-- 直接端點：`POST http://localhost:9080/rerank`
+-- 經由 Gateway：`POST http://localhost:9800/rerank`
 - 回傳格式：`{"ok": true, "results": [{"index": 1, "score": 0.83, "text": "..."}]}`
 
 ## 測試
