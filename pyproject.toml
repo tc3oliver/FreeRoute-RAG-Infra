@@ -22,4 +22,7 @@ line_length = 100
 multi_line_output = 3
 src_paths = ["services/gateway", "services/reranker", "integrations"]
 
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+
 # Development dependencies are listed in requirements-dev.txt for easy `pip install -r requirements-dev.txt`
