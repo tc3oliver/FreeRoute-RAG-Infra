@@ -40,14 +40,10 @@ dtype_map = {
 dtype = dtype_map.get(DTYPE_ENV, torch.bfloat16 if device.type == "cuda" else torch.float32)
 
 try:
-    logger.info(
-        "[Reranker] loading tokenizer/model model=%s device=%s dtype=%s", MODEL_ID, device, dtype
-    )
+    logger.info("[Reranker] loading tokenizer/model model=%s device=%s dtype=%s", MODEL_ID, device, dtype)
     tok = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
     model = (
-        AutoModelForSequenceClassification.from_pretrained(
-            MODEL_ID, trust_remote_code=True, torch_dtype=dtype
-        )
+        AutoModelForSequenceClassification.from_pretrained(MODEL_ID, trust_remote_code=True, torch_dtype=dtype)
         .to(device)
         .eval()
     )
@@ -101,9 +97,7 @@ def rerank(req: RerankReq) -> RerankResp:
     if not req.query or not isinstance(req.query, str):
         raise HTTPException(status_code=400, detail="query must be a non-empty string")
     if not isinstance(req.documents, list) or not req.documents:
-        raise HTTPException(
-            status_code=400, detail="documents must be a non-empty array of strings"
-        )
+        raise HTTPException(status_code=400, detail="documents must be a non-empty array of strings")
 
     docs = [d for d in req.documents if isinstance(d, str) and d.strip()]
     if not docs:
@@ -111,9 +105,7 @@ def rerank(req: RerankReq) -> RerankResp:
 
     pairs = [(req.query, d) for d in docs]
     try:
-        enc = tok.batch_encode_plus(
-            pairs, padding=True, truncation=True, max_length=TOKEN_MAXLEN, return_tensors="pt"
-        )
+        enc = tok.batch_encode_plus(pairs, padding=True, truncation=True, max_length=TOKEN_MAXLEN, return_tensors="pt")
         # Move BatchEncoding directly if supported; this is the most reliable path
         target_dev = MODEL_DEVICE
         try:
@@ -139,11 +131,7 @@ def rerank(req: RerankReq) -> RerankResp:
 
         # debug: log devices/dtypes/shapes of encoded inputs to trace device mismatches
         try:
-            items_iter = (
-                enc.items()
-                if isinstance(enc, dict)
-                else (enc.items() if hasattr(enc, "items") else [])
-            )
+            items_iter = enc.items() if isinstance(enc, dict) else (enc.items() if hasattr(enc, "items") else [])
             for k, v in items_iter:
                 if torch.is_tensor(v):
                     logger.info(
@@ -210,9 +198,7 @@ def rerank(req: RerankReq) -> RerankResp:
             hint,
             mem_info,
         )
-        raise HTTPException(
-            status_code=500, detail={"error": "inference_error", "message": exc_text, "hint": hint}
-        )
+        raise HTTPException(status_code=500, detail={"error": "inference_error", "message": exc_text, "hint": hint})
     except Exception as e:
         logger.exception("[Reranker] inference error model=%s error=%s", MODEL_ID, e)
         raise HTTPException(status_code=500, detail={"error": "inference_error", "message": str(e)})

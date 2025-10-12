@@ -9,9 +9,7 @@ from integrations.litellm.plugins import token_cap
 
 def test_is_openai_model_name_and_entrypoint():
     assert token_cap.is_openai_model_name("gpt-5-mini-2025-08-07")
-    assert token_cap.is_openai_entrypoint("rag-answer") is True or token_cap.is_openai_entrypoint(
-        "graph-extractor"
-    )
+    assert token_cap.is_openai_entrypoint("rag-answer") is True or token_cap.is_openai_entrypoint("graph-extractor")
 
 
 @pytest.mark.asyncio
@@ -27,9 +25,7 @@ async def test_pre_call_hook_redis_unavailable(monkeypatch):
     data = {"model": "rag-answer", "messages": [{"role": "user", "content": "hi"}]}
 
     # Should not raise even if redis unavailable
-    out = await tc.async_pre_call_hook(
-        {}, {}, data, "completion", request_data={"path": "/v1/chat"}
-    )
+    out = await tc.async_pre_call_hook({}, {}, data, "completion", request_data={"path": "/v1/chat"})
     assert out.get("model") is not None
 
 
@@ -59,8 +55,6 @@ async def test_pre_call_hook_reroute(monkeypatch):
         "messages": [{"role": "user", "content": "graph nodes and edges"}],
     }
 
-    out = await tc.async_pre_call_hook(
-        {}, {}, data, "completion", request_data={"path": "/v1/chat"}
-    )
+    out = await tc.async_pre_call_hook({}, {}, data, "completion", request_data={"path": "/v1/chat"})
     # model should be rerouted if over limit
     assert out.get("model") != "rag-answer"
