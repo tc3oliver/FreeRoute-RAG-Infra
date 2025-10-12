@@ -25,8 +25,11 @@ jobs:
           python -m pip install --upgrade pip
           # Lightweight deps for linting & basic runs; project services run in containers locally
           pip install ruff==0.6.9 pytest==8.3.3 pytest-asyncio requests jsonschema mypy coverage
-          # Optional heavy runtime deps (non-fatal); kept separate to avoid failing lint/tests if binary wheels unavailable
-          pip install fastapi uvicorn transformers sentence-transformers torch --only-binary=:all: || true
+          # Install gateway runtime/test dependencies so tests that import gateway packages
+          # (eg. httpx, fastapi, uvicorn) run in the CI test environment.
+          pip install -r services/gateway/requirements.txt || true
+          # Optional heavy runtime deps (non-fatal); kept separate to avoid failing lint/tests
+          pip install transformers sentence-transformers torch --only-binary=:all: || true
 
       - name: Lint (ruff)
         run: |
