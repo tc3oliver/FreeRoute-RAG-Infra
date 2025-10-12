@@ -4,6 +4,7 @@ import logging
 import os
 import time
 import uuid
+from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -75,12 +76,74 @@ async def add_request_id(request: Request, call_next):
     """Attach X-Request-ID to every request/response for tracing."""
     rid = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     request.state.request_id = rid
+    # initialize per-request context
+    token = request_ctx.set(
+        {
+            "request_id": rid,
+            "client_ip": request.client.host if request.client else "-",
+            "start_time": time.time(),
+        }
+    )
     try:
         response = await call_next(request)
     finally:
-        pass
+        # restore previous context
+        request_ctx.reset(token)
     response.headers["X-Request-ID"] = rid
     return response
+
+
+# per-request context stored in a ContextVar so logging filter can access it
+request_ctx: ContextVar[Dict[str, Any]] = ContextVar("request_ctx", default={})
+
+
+class RequestContextFilter(logging.Filter):
+    """Attach current request context fields to LogRecord.
+
+    The filter adds: request_id, client_ip, duration_ms, and event (if present).
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        ctx = request_ctx.get({})
+        record.request_id = ctx.get("request_id", "-")
+        record.client_ip = ctx.get("client_ip", "-")
+        start = ctx.get("start_time")
+        if start:
+            record.duration_ms = int((time.time() - start) * 1000)
+        else:
+            record.duration_ms = 0
+        # ensure an event field exists
+        if not hasattr(record, "event"):
+            record.event = getattr(record, "event", "-")
+        return True
+
+
+# attach filter to gateway logger handlers (if any) so records include context
+try:
+    f = RequestContextFilter()
+    logger.addFilter(f)
+    for h in logger.handlers:
+        # prefer a compact structured formatter for gateway logs
+        try:
+            h.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s %(levelname)s [req:%(request_id)s] [ip:%(client_ip)s] [evt:%(event)s] [dur:%(duration_ms)dms] %(message)s"
+                )
+            )
+        except Exception:
+            pass
+except Exception:
+    pass
+
+
+def log_event(msg: str, event: str, level: int = logging.INFO, **meta: Any) -> None:
+    """Convenience helper to log with an `event` and optional structured metadata.
+
+    Usage: log_event("starting extraction", "graph.extract.start", provider=provider)
+    """
+    extra = {"event": event}
+    extra.update(meta)
+    logger.log(level, msg, extra=extra)
 
 
 def require_key(
@@ -565,7 +628,7 @@ def graph_probe(req: GraphProbeReq, request: Request) -> Dict[str, Any]:
     response_model=GraphExtractResp,
     tags=["graph"],
 )
-def graph_extract(req: GraphReq) -> Dict[str, Any]:
+def graph_extract(req: GraphReq, request: Request) -> Dict[str, Any]:
     min_nodes = int(req.min_nodes) if req.min_nodes is not None else GRAPH_MIN_NODES
     min_edges = int(req.min_edges) if req.min_edges is not None else GRAPH_MIN_EDGES
     allow_empty = bool(req.allow_empty) if req.allow_empty is not None else GRAPH_ALLOW_EMPTY
@@ -637,27 +700,31 @@ def graph_extract(req: GraphReq) -> Dict[str, Any]:
     attempts: List[Dict[str, Any]] = []
 
     for provider in provider_chain:
-        logger.info("[GraphExtract] trying provider: %s", provider)
+        # middleware already populated request_ctx; add attempt-level event
+        log_event("trying provider", event="graph.extract.try", provider=provider)
         for attempt in range(1, max_attempts + 1):
             mode = "strict" if attempt == 1 else "nudge"
             try:
                 result = _retry_once_429(_call_once, provider, mode)
                 data = result["data"]
-                logger.info(
-                    "[GraphExtract] attempt %s with %s (%s) produced %s nodes and %s edges",
-                    attempt,
-                    provider,
-                    mode,
-                    len(data.get("nodes", [])),
-                    len(data.get("edges", [])),
+                log_event(
+                    "attempt finished",
+                    event="graph.extract.attempt",
+                    attempt=attempt,
+                    provider=provider,
+                    mode=mode,
+                    nodes=len(data.get("nodes", [])),
+                    edges=len(data.get("edges", [])),
                 )
 
                 if _is_single_error_node(data):
-                    logger.warning(
-                        "[GraphExtract] attempt %s with %s (%s) produced a single error node",
-                        attempt,
-                        provider,
-                        mode,
+                    log_event(
+                        "single error node produced",
+                        event="graph.extract.error_node",
+                        attempt=attempt,
+                        provider=provider,
+                        mode=mode,
+                        level=logging.WARNING,
                     )
                     attempts.append(
                         {
@@ -690,12 +757,14 @@ def graph_extract(req: GraphReq) -> Dict[str, Any]:
                 )
 
             except Exception as e:
-                logger.warning(
-                    "[GraphExtract] attempt %s with %s (%s) failed: %s",
-                    attempt,
-                    provider,
-                    mode,
-                    e,
+                log_event(
+                    "attempt failed",
+                    event="graph.extract.failed",
+                    attempt=attempt,
+                    provider=provider,
+                    mode=mode,
+                    error=str(e),
+                    level=logging.WARNING,
                 )
                 if not req.repair_if_invalid:
                     attempts.append(
@@ -770,12 +839,19 @@ def graph_extract(req: GraphReq) -> Dict[str, Any]:
                             "error": f"{type(e2).__name__}: {e2}",
                         }
                     )
-        logger.info(
-            "[GraphExtract] provider %s exhausted all attempts, moving to next if any",
-            provider,
+        log_event(
+            "provider exhausted",
+            event="graph.extract.provider_exhausted",
+            provider=provider,
+            level=logging.INFO,
         )
 
-    logger.error("[GraphExtract] all providers exhausted, total attempts: %s", len(attempts))
+    log_event(
+        "all providers exhausted",
+        event="graph.extract.exhausted",
+        attempts=len(attempts),
+        level=logging.ERROR,
+    )
     raise HTTPException(
         status_code=422,
         detail={
