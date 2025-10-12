@@ -32,41 +32,59 @@ FreeRoute RAG Infra 是一套可本機部署的 RAG/GraphRAG 基礎設施，目�
 ## 目錄
 
 - [專案簡介](#專案簡介)
-- [概觀](#概觀)
-- [功能](#功能)
-- [架構](#架構)
-- [需求](#需求)
-- [快速開始](#快速開始)
-- [設定與環境變數](#設定與環境變數)
-- [服務與埠號](#服務與埠號)
-- [免費額度與來源](#免費額度與來源)
-- [模型入口與路由](#模型入口與路由)
-- [API](#api)
-- [Graph Schema](#graph-schema)
-- [Reranker 與 Embeddings](#reranker-與-embeddings)
-- [測試](#測試)
-- [疑難排解](#疑難排解)
-- [專案結構](#專案結構)
-- [授權](#授權)
+## 快速開始
 
-## 概觀
+1) 建立 `.env`（示例）：
 
-FreeRoute RAG Infra 提供可直接部署的檢索增強生成（RAG）與 GraphRAG 執行環境，重點在於：
+```bash
+# .env（示例）
+OPENAI_API_KEY=...
+GOOGLE_API_KEY=...
+OPENROUTER_API_KEY=...
+GROQ_API_KEY=...
+# 可選：API_GATEWAY_KEYS=dev-key,another-key
+```
 
-- LangChain/OpenAI API 相容；可作為私有 LLM API Proxy 使用。
-- 多供應商容錯與改道（OpenAI 達 TPD/錯誤時自動切換至 Gemini/Groq/OpenRouter）。
-- Gateway 層提供 JSON 模式、Graph 抽取流程、Schema 驗證與修復。
-- TokenCap 控制每日 OpenAI Token，搭配 Redis 計數與 Dashboard 視覺化。
+2) 使用 Docker Compose 啟動（建議）：
 
-## 功能
+```bash
+docker compose up -d --build
+```
 
-- OpenAI 相容 API（LiteLLM Proxy）
-- API Gateway：/chat、/embed、/rerank、/graph/extract
-- 本地 Embeddings：Ollama bge-m3
-- 本地 Reranker：BAAI/bge-reranker-v2-m3（支援 GPU）
-- TokenCap：每日 Token 限額、跨供應商自動改道
-- Dashboard UI：請求、錯誤、用量觀測
+3) 健康檢查：
 
+```bash
+curl -s http://localhost:9400/health || curl -s http://localhost:9400/health/readiness | jq
+curl -s http://localhost:9800/health | jq
+```
+
+4) Dashboard（LiteLLM UI）：
+
+- URL: http://localhost:9400/ui
+- 預設帳密：admin / admin123（請儘速修改）
+
+首次啟動注意事項：
+
+- Ollama 會自動拉取 `bge-m3` 模型；Reranker 在首次啟動時會下載 `BAAI/bge-reranker-v2-m3`，可能需數分鐘。
+- Docker Compose 會建立持久卷，如 `ollama_models` 與 `reranker_models`。
+
+開發者快速啟動（使用 repo 的 .venv）：
+
+```bash
+# 建立虛擬環境（若尚未建立）
+python -m venv .venv
+source .venv/bin/activate
+# 安裝執行與開發依賴
+pip install -r services/gateway/requirements.txt
+pip install -r requirements-dev.txt
+```
+
+本機啟動 Gateway（開發用）：
+
+```bash
+# 於專案根目錄執行
+PYTHONPATH=$(pwd) .venv/bin/uvicorn services.gateway.app:app --reload --port 9800
+```
 ## 對象
 
 - 想以最低成本驗證 RAG/GraphRAG 的個人與團隊
@@ -405,12 +423,56 @@ Reranker（bge-reranker-v2-m3）
 
 ## 測試
 
-使用 pytest 執行整合測試（需先啟動 docker-compose）：
+Unit 測試（快速，無外部服務需求）：
 
 ```bash
-pytest -q tests/gateway
-pytest -q tests/reranker
+# 於 repo 根目錄，確保 PYTHONPATH 包含專案
+PYTHONPATH=$(pwd) .venv/bin/pytest -q tests/unit
 ```
+
+Integration / smoke 測試（需透過 Docker Compose 啟動服務）：
+
+```bash
+docker compose up -d --build
+PYTHONPATH=$(pwd) .venv/bin/pytest -q tests/integration
+```
+
+如果不使用 repo 的 .venv，請先 `pip install -r requirements-dev.txt`。
+
+測試小提示：
+
+- 在 repo 根目錄執行 pytest 時，使用 `PYTHONPATH=$(pwd)` 以便 `services.*` 匯入能被解析。
+- 執行單一測試檔：`PYTHONPATH=$(pwd) .venv/bin/pytest tests/unit/test_gateway_graph_extract.py -q`。
+
+## Metrics (Prometheus)
+
+API Gateway 提供一個可選的 `/metrics` 端點（於安裝 `prometheus-client` 時啟用）。
+
+安裝方式（本機或 CI）：
+
+```bash
+pip install prometheus-client
+```
+
+行為說明：
+
+- 若安裝 `prometheus-client`，`/metrics` 會回傳 Prometheus 格式的指標。Gateway 會收集每個路徑的請求數與請求延遲。
+- 若未安裝，`/metrics` 會回 204，方便在最小部署或 CI 中探測。
+
+Prometheus scraping 範例（prometheus.yml 的 `scrape_configs`）：
+
+```yaml
+- job_name: 'free-rag-gateway'
+  static_configs:
+    - targets: ['host.docker.internal:9800']
+      labels:
+        service: gateway
+```
+
+備註：
+
+- Gateway 使用 module-local CollectorRegistry（避免在測試或模組重載時重複註冊指標）
+- 建議在 CI 的測試步驟中安裝 `prometheus-client` 來驗證 metrics 行為
 
 ## 開發環境與 pre-commit（簡短說明）
 

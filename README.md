@@ -20,42 +20,59 @@ Zero-Cost RAG/GraphRAG Infrastructure — LangChain Compatible
 FreeRoute RAG Infra is a locally deployable RAG/GraphRAG infrastructure designed to help developers build and test with zero cost whenever possible (Free-first). It prioritizes free or low-cost providers, falls back when quotas are hit, and includes local components.
 
 Highlights:
+Quick start (local)
 
-- Free-first routing: Prefer free or low-cost providers. When OpenAI hits daily token caps (TPD) or errors occur, automatically reroute to Gemini / Groq / OpenRouter. Local embeddings via Ollama.
-- Standard interfaces: LiteLLM exposes OpenAI-compatible endpoints (for LangChain/SDK). API Gateway provides /chat, /embed, /rerank, /graph/extract.
-- Local capabilities: Embeddings via Ollama (bge-m3), reranking via bge-reranker-v2-m3, optional GPU.
-- Observability & governance: TokenCap (daily OpenAI token limits and accounting), Redis, Dashboard UI.
-- GraphRAG: Extraction plus JSON Schema validation/repair. Structure maps cleanly to Neo4j/GraphDB style.
+1) Create a `.env` file (example):
 
-Use cases: Individual/team Dev/Test, private LLM API proxy, workshops/courses, RAG/GraphRAG PoC.
+```bash
+# .env (example)
+OPENAI_API_KEY=...
+GOOGLE_API_KEY=...
+OPENROUTER_API_KEY=...
+GROQ_API_KEY=...
+# Optional: API_GATEWAY_KEYS=dev-key,another-key
+```
 
-## Table of contents
+2) Start with Docker Compose (recommended):
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Features](#features)
-- [Requirements](#requirements)
-- [Quick start](#quick-start)
-- [Configuration](#configuration)
-- [Services and ports](#services-and-ports)
-- [Free tiers and sources](#free-tiers-and-sources)
-- [Model entrypoints and routing](#model-entrypoints-and-routing)
-- [API](#api)
-- [Graph Schema](#graph-schema)
-- [Reranker and embeddings](#reranker-and-embeddings)
-- [Testing](#testing)
-- [Troubleshooting](#troubleshooting)
-- [Project structure](#project-structure)
-- [License](#license)
+```bash
+docker compose up -d --build
+```
 
-## Architecture
+3) Health checks:
 
-```mermaid
-flowchart TB
-  subgraph CLIENT["Client Applications"]
-    LC["LangChain / SDK"]
+```bash
+curl -s http://localhost:9400/health || curl -s http://localhost:9400/health/readiness | jq
+curl -s http://localhost:9800/health | jq
+```
+
+4) Dashboard (LiteLLM UI):
+
+- URL: http://localhost:9400/ui
+- Default credentials: admin / admin123 (change ASAP)
+
+Notes:
+
+- Ollama will pull the `bge-m3` model automatically. The reranker downloads `BAAI/bge-reranker-v2-m3` on first run; this can take several minutes.
+- Persistent volumes used by the compose setup include `ollama_models` and `reranker_models`.
+
+Developer quick start (using the repo `.venv`):
+
+```bash
+# create venv (if not present)
+python -m venv .venv
+source .venv/bin/activate
+# install runtime + dev requirements
+pip install -r services/gateway/requirements.txt
+pip install -r requirements-dev.txt
+```
+
+Run the gateway locally (for development):
+
+```bash
     FE["Web / API Client"]
   end
+```
 
   subgraph GATEWAY["API Gateway (9800)"]
     G1["/chat"]
@@ -387,18 +404,53 @@ Reranker (bge-reranker-v2-m3)
 
 ## Testing
 
-- Unit tests (no services required):
+Unit tests (fast, no external services):
 
 ```bash
-pytest -q tests/unit
+# from repo root, ensure PYTHONPATH includes repo
+PYTHONPATH=$(pwd) .venv/bin/pytest -q tests/unit
 ```
 
-- Integration/smoke (requires services running via docker compose):
+Integration and smoke tests (requires services running via Docker Compose):
 
 ```bash
-pytest -q tests/integration
-pytest -q tests/reranker
+docker compose up -d --build
+PYTHONPATH=$(pwd) .venv/bin/pytest -q tests/integration
 ```
+
+If you don't use the repo `.venv`, run `pip install -r requirements-dev.txt` first.
+
+Test tips:
+
+- Use `PYTHONPATH=$(pwd)` when running pytest from repo root so `services.*` imports resolve.
+- To run a single test file: `PYTHONPATH=$(pwd) .venv/bin/pytest tests/unit/test_gateway_graph_extract.py -q`.
+
+### Metrics (Prometheus)
+The API Gateway exposes an optional `/metrics` endpoint when the `prometheus-client` package is installed.
+
+Install locally or in CI to enable scraping:
+
+```bash
+pip install prometheus-client
+```
+
+Behavior:
+- When `prometheus-client` is installed, `/metrics` returns Prometheus-formatted metrics. The gateway collects per-endpoint request counts and request duration.
+- When not installed, `/metrics` returns HTTP 204 so probes remain safe in minimal deployments.
+
+Quick example for Prometheus scraping (Prometheus `scrape_configs`):
+
+```yaml
+- job_name: 'free-rag-gateway'
+  static_configs:
+    - targets: ['host.docker.internal:9800']
+      labels:
+        service: gateway
+```
+
+Notes:
+- The gateway uses a module-local CollectorRegistry to avoid duplicated registration when reloading in tests or during interpreter restarts.
+- You can enable metrics in CI by installing `prometheus-client` in the test step.
 
 ## Developer setup & pre-commit (short)
 

@@ -8,7 +8,8 @@ from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
 import requests
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import PlainTextResponse
 from jsonschema import Draft202012Validator, validate
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -18,9 +19,7 @@ LITELLM_BASE = os.environ.get("LITELLM_BASE", "http://litellm:4000/v1").rstrip("
 LITELLM_KEY = os.environ.get("LITELLM_KEY", "sk-admin")
 RERANKER_URL = os.environ.get("RERANKER_URL", "http://reranker:8080")
 
-API_KEYS = {
-    k.strip() for k in os.environ.get("API_GATEWAY_KEYS", "dev-key").split(",") if k.strip()
-}
+API_KEYS = {k.strip() for k in os.environ.get("API_GATEWAY_KEYS", "dev-key").split(",") if k.strip()}
 # 統一路徑：容器內掛載到 /app/schemas/graph_schema.json
 GRAPH_SCHEMA_PATH = os.environ.get("GRAPH_SCHEMA_PATH", "/app/schemas/graph_schema.json")
 
@@ -31,9 +30,7 @@ GRAPH_ALLOW_EMPTY = os.environ.get("GRAPH_ALLOW_EMPTY", "false").lower() == "tru
 GRAPH_MAX_ATTEMPTS = int(os.environ.get("GRAPH_MAX_ATTEMPTS", "2"))
 DEFAULT_PROVIDER_CHAIN = ["graph-extractor", "graph-extractor-o1mini", "graph-extractor-gemini"]
 ENV_PROVIDER_CHAIN = [
-    x.strip()
-    for x in os.environ.get("GRAPH_PROVIDER_CHAIN", ",".join(DEFAULT_PROVIDER_CHAIN)).split(",")
-    if x.strip()
+    x.strip() for x in os.environ.get("GRAPH_PROVIDER_CHAIN", ",".join(DEFAULT_PROVIDER_CHAIN)).split(",") if x.strip()
 ]
 PROVIDER_CHAIN = ENV_PROVIDER_CHAIN if ENV_PROVIDER_CHAIN else DEFAULT_PROVIDER_CHAIN
 
@@ -93,6 +90,52 @@ async def add_request_id(request: Request, call_next):
     return response
 
 
+# Optional Prometheus metrics (soft dependency). If prometheus-client isn't
+# installed the gateway will still function; metrics will be disabled.
+try:
+    from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, Histogram, generate_latest
+
+    # Use a module-local CollectorRegistry to avoid conflicts when the module is
+    # reloaded during tests or in long-running interpreters. This prevents
+    # "Duplicated timeseries" ValueError on re-import.
+    METRICS_ENABLED = True
+    _METRICS_REG = CollectorRegistry()
+    REQUEST_COUNTER = Counter(
+        "gateway_requests_total",
+        "Total HTTP requests",
+        ["method", "endpoint", "http_status"],
+        registry=_METRICS_REG,
+    )
+    REQUEST_LATENCY = Histogram(
+        "gateway_request_duration_seconds",
+        "Request latency",
+        ["method", "endpoint"],
+        registry=_METRICS_REG,
+    )
+except Exception:
+    METRICS_ENABLED = False
+
+
+@app.middleware("http")
+async def prometheus_middleware(request: Request, call_next):
+    """Middleware to record Prometheus metrics (if enabled)."""
+    if not METRICS_ENABLED:
+        return await call_next(request)
+
+    path = request.url.path
+    method = request.method
+    try:
+        with REQUEST_LATENCY.labels(method=method, endpoint=path).time():
+            resp = await call_next(request)
+    except Exception:
+        # increment counter for 500 on exception paths
+        REQUEST_COUNTER.labels(method=method, endpoint=path, http_status="500").inc()
+        raise
+    status = str(resp.status_code)
+    REQUEST_COUNTER.labels(method=method, endpoint=path, http_status=status).inc()
+    return resp
+
+
 # per-request context stored in a ContextVar so logging filter can access it
 request_ctx: ContextVar[Dict[str, Any]] = ContextVar("request_ctx", default={})
 
@@ -135,6 +178,8 @@ try:
 except Exception:
     pass
 
+    pass
+
 
 def log_event(msg: str, event: str, level: int = logging.INFO, **meta: Any) -> None:
     """Convenience helper to log with an `event` and optional structured metadata.
@@ -146,9 +191,7 @@ def log_event(msg: str, event: str, level: int = logging.INFO, **meta: Any) -> N
     logger.log(level, msg, extra=extra)
 
 
-def require_key(
-    x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)
-) -> bool:
+def require_key(x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)) -> bool:
     token = None
     if x_api_key:
         token = x_api_key.strip()
@@ -360,9 +403,7 @@ def _dedup_merge_nodes(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for n in nodes:
         k = n["id"]
         if k in by_id:
-            seen = {
-                (p["key"], json.dumps(p["value"], ensure_ascii=False)) for p in by_id[k]["props"]
-            }
+            seen = {(p["key"], json.dumps(p["value"], ensure_ascii=False)) for p in by_id[k]["props"]}
             for p in n["props"]:
                 sig = (p["key"], json.dumps(p["value"], ensure_ascii=False))
                 if sig not in seen:
@@ -395,11 +436,7 @@ def _normalize_graph_shape(data: Any) -> Dict[str, Any]:
             ntype = (
                 n.get("type")
                 or n.get("label")
-                or (
-                    n.get("labels")[0]
-                    if isinstance(n.get("labels"), list) and n.get("labels")
-                    else None
-                )
+                or (n.get("labels")[0] if isinstance(n.get("labels"), list) and n.get("labels") else None)
                 or "Entity"
             )
             props = _kvize(n.get("props"))
@@ -488,6 +525,23 @@ def version() -> Dict[str, str]:
     return {"version": APP_VERSION}
 
 
+@app.get("/metrics", tags=["meta"])
+def metrics() -> Response:
+    """Expose Prometheus metrics if prometheus-client is installed.
+
+    Returns an empty 204 response when metrics are disabled so the endpoint
+    can be probed safely in environments without the optional dependency.
+    """
+    if not METRICS_ENABLED:
+        return Response(status_code=204)
+    try:
+        data = generate_latest(_METRICS_REG)
+    except Exception:
+        # fallback to default collector if registry call fails
+        data = generate_latest()
+    return PlainTextResponse(content=data, media_type=CONTENT_TYPE_LATEST)
+
+
 @app.post("/chat", dependencies=[Depends(require_key)], response_model=ChatResp, tags=["chat"])
 def chat(req: ChatReq, request: Request) -> Dict[str, Any]:
     model = _normalize_model(req.model, kind="chat")
@@ -534,9 +588,7 @@ def embed(req: EmbedReq) -> Dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"embed_error: {e}")
 
 
-@app.post(
-    "/rerank", dependencies=[Depends(require_key)], response_model=RerankResp, tags=["rerank"]
-)
+@app.post("/rerank", dependencies=[Depends(require_key)], response_model=RerankResp, tags=["rerank"])
 def rerank(req: RerankReq) -> Dict[str, Any]:
     try:
         r = requests.post(
@@ -564,15 +616,11 @@ def graph_probe(req: GraphProbeReq, request: Request) -> Dict[str, Any]:
     ]
     if req.strict_json:
         has_json_word = any(
-            isinstance(m, dict)
-            and isinstance(m.get("content"), str)
-            and ("json" in m["content"].lower())
+            isinstance(m, dict) and isinstance(m.get("content"), str) and ("json" in m["content"].lower())
             for m in messages
         )
         if not has_json_word:
-            messages = [
-                {"role": "system", "content": "請以 JSON 物件回覆（JSON only）。"}
-            ] + messages
+            messages = [{"role": "system", "content": "請以 JSON 物件回覆（JSON only）。"}] + messages
 
     extra = {}
     if req.strict_json:
@@ -777,10 +825,10 @@ def graph_extract(req: GraphReq, request: Request) -> Dict[str, Any]:
                     )
                     continue
 
-                FIX_SYS = (
-                    "請把下列輸出修正成『合法 JSON』且符合 Schema；不得改動語意；只回傳 JSON 本體。"
+                FIX_SYS = "請把下列輸出修正成『合法 JSON』且符合 Schema；不得改動語意；只回傳 JSON 本體。"
+                FIX_USER = (
+                    f"【schema】\n{json.dumps(GRAPH_JSON_SCHEMA, ensure_ascii=False)}\n\n【llm_output】\n{str(e)}"
                 )
-                FIX_USER = f"【schema】\n{json.dumps(GRAPH_JSON_SCHEMA, ensure_ascii=False)}\n\n【llm_output】\n{str(e)}"
 
                 try:
                     resp2 = client.chat.completions.create(
