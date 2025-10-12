@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -69,6 +70,19 @@ if not logger.handlers:
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
 
 
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    """Attach X-Request-ID to every request/response for tracing."""
+    rid = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = rid
+    try:
+        response = await call_next(request)
+    finally:
+        pass
+    response.headers["X-Request-ID"] = rid
+    return response
+
+
 def require_key(
     x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)
 ) -> bool:
@@ -91,6 +105,90 @@ class ChatReq(BaseModel):
 
 class EmbedReq(BaseModel):
     texts: List[str]
+
+
+# ---------- Response Models (keep existing fields; purely descriptive) ----------
+
+
+class HealthResp(BaseModel):
+    ok: bool
+
+
+class VersionResp(BaseModel):
+    version: str
+
+
+class WhoAmIResp(BaseModel):
+    app_version: str
+    litellm_base: str
+    entrypoints: List[str]
+    json_mode_hint_injection: bool
+    graph_schema_path: str
+    schema_hash: str
+    graph_defaults: Dict[str, Any]
+
+
+class EmbedResp(BaseModel):
+    ok: bool
+    vectors: List[List[float]]
+    dim: int
+
+
+class RerankItem(BaseModel):
+    index: int
+    score: float
+    text: Optional[str] = None
+
+
+class RerankResp(BaseModel):
+    ok: bool
+    results: List[RerankItem]
+
+
+class ChatResp(BaseModel):
+    ok: bool
+    data: Any
+    meta: Dict[str, Any]
+
+
+class KV(BaseModel):
+    key: str
+    value: Any
+
+
+class GraphNode(BaseModel):
+    id: str
+    type: str
+    props: List[KV]
+
+
+class GraphEdge(BaseModel):
+    src: str
+    dst: str
+    type: str
+    props: List[KV]
+
+
+class GraphData(BaseModel):
+    nodes: List[GraphNode]
+    edges: List[GraphEdge]
+
+
+class GraphExtractResp(BaseModel):
+    ok: bool
+    data: GraphData
+    provider: str
+    schema_hash: str
+
+
+class GraphProbeResp(BaseModel):
+    ok: bool
+    mode: str
+    provider: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+    text: Optional[str] = None
+    error: Optional[str] = None
+    raw: Optional[str] = None
 
 
 class RerankReq(BaseModel):
@@ -298,12 +396,12 @@ def _prune_graph(data: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
-@app.get("/health")
+@app.get("/health", response_model=HealthResp, tags=["meta"])
 def health() -> Dict[str, Any]:
     return {"ok": True}
 
 
-@app.get("/whoami", dependencies=[Depends(require_key)])
+@app.get("/whoami", dependencies=[Depends(require_key)], response_model=WhoAmIResp, tags=["meta"])
 def whoami() -> Dict[str, Any]:
     return {
         "app_version": APP_VERSION,
@@ -322,12 +420,12 @@ def whoami() -> Dict[str, Any]:
     }
 
 
-@app.get("/version")
+@app.get("/version", response_model=VersionResp, tags=["meta"])
 def version() -> Dict[str, str]:
     return {"version": APP_VERSION}
 
 
-@app.post("/chat", dependencies=[Depends(require_key)])
+@app.post("/chat", dependencies=[Depends(require_key)], response_model=ChatResp, tags=["chat"])
 def chat(req: ChatReq, request: Request) -> Dict[str, Any]:
     model = _normalize_model(req.model, kind="chat")
     messages = req.messages
@@ -362,7 +460,7 @@ def chat(req: ChatReq, request: Request) -> Dict[str, Any]:
         return {"ok": True, "data": out, "meta": meta}
 
 
-@app.post("/embed", dependencies=[Depends(require_key)])
+@app.post("/embed", dependencies=[Depends(require_key)], response_model=EmbedResp, tags=["embed"])
 def embed(req: EmbedReq) -> Dict[str, Any]:
     try:
         r = client.embeddings.create(model="local-embed", input=req.texts)
@@ -373,7 +471,9 @@ def embed(req: EmbedReq) -> Dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"embed_error: {e}")
 
 
-@app.post("/rerank", dependencies=[Depends(require_key)])
+@app.post(
+    "/rerank", dependencies=[Depends(require_key)], response_model=RerankResp, tags=["rerank"]
+)
 def rerank(req: RerankReq) -> Dict[str, Any]:
     try:
         r = requests.post(
@@ -388,7 +488,12 @@ def rerank(req: RerankReq) -> Dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"rerank_error: {e}")
 
 
-@app.post("/graph/probe", dependencies=[Depends(require_key)])
+@app.post(
+    "/graph/probe",
+    dependencies=[Depends(require_key)],
+    response_model=GraphProbeResp,
+    tags=["graph"],
+)
 def graph_probe(req: GraphProbeReq, request: Request) -> Dict[str, Any]:
     messages = req.messages or [
         {"role": "system", "content": "你是資訊抽取引擎，只輸出 JSON（若無法則輸出簡短文字）。"},
@@ -454,7 +559,12 @@ def graph_probe(req: GraphProbeReq, request: Request) -> Dict[str, Any]:
         )
 
 
-@app.post("/graph/extract", dependencies=[Depends(require_key)])
+@app.post(
+    "/graph/extract",
+    dependencies=[Depends(require_key)],
+    response_model=GraphExtractResp,
+    tags=["graph"],
+)
 def graph_extract(req: GraphReq) -> Dict[str, Any]:
     min_nodes = int(req.min_nodes) if req.min_nodes is not None else GRAPH_MIN_NODES
     min_edges = int(req.min_edges) if req.min_edges is not None else GRAPH_MIN_EDGES

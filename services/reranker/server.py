@@ -42,6 +42,15 @@ model = (
     .eval()
 )
 
+logger.info(
+    "[Reranker] ready model=%s device=%s dtype=%s torch=%s cuda=%s",
+    MODEL_ID,
+    device,
+    dtype,
+    torch.__version__,
+    torch.cuda.is_available(),
+)
+
 
 class RerankReq(BaseModel):
     query: str = Field(..., description="search/query text")
@@ -54,7 +63,18 @@ def health() -> Dict[str, Any]:
     return {"ok": True, "device": device, "dtype": str(dtype), "model": MODEL_ID}
 
 
-@app.post("/rerank")
+class RerankItem(BaseModel):
+    index: int
+    score: float
+    text: str
+
+
+class RerankResp(BaseModel):
+    ok: bool
+    results: List[RerankItem]
+
+
+@app.post("/rerank", response_model=RerankResp, tags=["rerank"])
 def rerank(req: RerankReq) -> Dict[str, Any]:
     if not req.query or not isinstance(req.query, str):
         raise HTTPException(status_code=400, detail="query must be a non-empty string")
@@ -76,6 +96,13 @@ def rerank(req: RerankReq) -> Dict[str, Any]:
         with torch.no_grad():
             logits = model(**enc).logits.squeeze(-1)
             scores = logits.detach().float().tolist()
+    except RuntimeError as e:
+        # CUDA OOM 或其他 runtime error
+        msg = f"inference_error: {e}"
+        if "CUDA out of memory" in str(e):
+            msg += "; hint: reduce top_n or TOKEN_MAXLEN, or switch DTYPE/DEVICE"
+        logger.exception("rerank inference runtime error")
+        raise HTTPException(status_code=500, detail=msg)
     except Exception as e:
         logger.exception("rerank inference error")
         raise HTTPException(status_code=500, detail=f"inference_error: {e}")

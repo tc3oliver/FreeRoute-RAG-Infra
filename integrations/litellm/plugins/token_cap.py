@@ -8,8 +8,11 @@ Behavior preserved; this file adds typing and clarifying comments.
 
 import datetime
 import json
+import logging
 import os
 from typing import Any, Dict, Literal
+
+import redis.asyncio as redis
 
 try:
     from litellm.integrations.custom_logger import CustomLogger
@@ -19,7 +22,9 @@ except Exception:
         pass
 
 
-import redis.asyncio as redis
+logger = logging.getLogger("tokencap")
+if not logger.handlers:
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
 
 OPENAI_TPD_LIMIT = int(os.getenv("OPENAI_TPD_LIMIT", "10000000"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
@@ -188,11 +193,16 @@ class TokenCap(CustomLogger):
             return data
 
         model = data.get("model") or ""
-        print("[TokenCap] pre model =", model)
+        logger.debug("[TokenCap] event=pre model=%s", model)
 
-        r = await self._redis()
-        tpd_key = _today_key("tpd:openai")
-        used = int(await r.get(tpd_key) or 0)
+        try:
+            r = await self._redis()
+            tpd_key = _today_key("tpd:openai")
+            used = int(await r.get(tpd_key) or 0)
+        except Exception:
+            # Redis 不可用時，優雅退化視為未達額度（避免影響主流程）
+            logger.warning("[TokenCap] Redis unavailable; skipping TPD enforcement")
+            used = 0
 
         if used >= OPENAI_TPD_LIMIT:
             hops = 0
@@ -223,7 +233,7 @@ class TokenCap(CustomLogger):
                 data["model"] = new_model
                 model = new_model
                 hops += 1
-                print(f"[TokenCap] reroute(hop {hops}) ->", new_model)
+                logger.info("[TokenCap] event=reroute hop=%s new_model=%s", hops, new_model)
 
             if (
                 model.lower().startswith("openai/") or is_openai_model_name(model)
