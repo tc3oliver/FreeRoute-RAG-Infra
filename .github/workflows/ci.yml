@@ -24,7 +24,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # Lightweight deps for linting & basic runs; project services run in containers locally
-          pip install ruff==0.6.9 pytest==8.3.3 pytest-asyncio requests jsonschema
+          pip install ruff==0.6.9 pytest==8.3.3 pytest-asyncio requests jsonschema mypy coverage
           # Optional heavy runtime deps (non-fatal); kept separate to avoid failing lint/tests if binary wheels unavailable
           pip install fastapi uvicorn transformers sentence-transformers torch --only-binary=:all: || true
 
@@ -33,10 +33,23 @@ jobs:
           ruff --version
           ruff check .
 
-      - name: Run unit tests
+      - name: Type check (mypy)
+        run: |
+          mypy --version
+          mypy --config-file mypy.ini integrations/litellm/plugins/token_cap.py
+
+      - name: Run unit tests with coverage
         run: |
           python --version
-          pytest -q tests/unit
+          coverage run -m pytest -q tests/unit
+          coverage xml -o coverage.xml
+          coverage report -m
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
 
   docker-build:
     name: Build Docker images

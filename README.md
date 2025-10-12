@@ -387,10 +387,16 @@ Reranker (bge-reranker-v2-m3)
 
 ## Testing
 
-Run integration tests with pytest (services must be up):
+- Unit tests (no services required):
 
 ```bash
-pytest -q tests/gateway
+pytest -q tests/unit
+```
+
+- Integration/smoke (requires services running via docker compose):
+
+```bash
+pytest -q tests/integration
 pytest -q tests/reranker
 ```
 
@@ -460,8 +466,13 @@ OpenAI calls still used after TPD reached:
 ├─ configs/
 │  └─ litellm.config.yaml    # LiteLLM models and routing strategy
 ├─ tests/
-│  ├─ gateway/test_gateway.py
-│  └─ reranker/test_reranker.py
+│  ├─ unit/                      # Fast unit tests (CI default)
+│  │  ├─ test_gateway_handlers.py
+│  │  └─ test_tokencap.py
+│  ├─ integration/               # E2E smoke against running services
+│  │  └─ test_gateway_smoke.py
+│  └─ reranker/
+│     └─ test_reranker.py
 ├─ docker-compose.yml        # One-command deploy
 ├─ pyproject.toml
 ├─ README.md / README.zh-TW.md / ROADMAP.md

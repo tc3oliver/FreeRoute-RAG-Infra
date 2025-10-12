@@ -14,16 +14,19 @@ import datetime
 import json
 import logging
 import os
-from typing import Any, Dict, Literal, Optional
+from typing import TYPE_CHECKING, Any, Dict, Literal, Optional
 
 import redis.asyncio as redis
 
-try:
-    from litellm.integrations.custom_logger import CustomLogger
-except Exception:
+if TYPE_CHECKING:
+    from litellm.integrations.custom_logger import CustomLogger as _CustomLogger
+else:  # runtime import with fallback
+    try:
+        from litellm.integrations.custom_logger import CustomLogger as _CustomLogger
+    except Exception:  # pragma: no cover
 
-    class CustomLogger:  # fallback
-        pass
+        class _CustomLogger:  # fallback to allow plugin import in unit tests
+            def __init__(self, *args, **kwargs): ...
 
 
 logger = logging.getLogger("tokencap")
@@ -78,9 +81,7 @@ def is_openai_model_name(name: str) -> bool:
 def is_openai_entrypoint(name: str) -> bool:
     if not name:
         return False
-    return name in OPENAI_ENTRYPOINTS_EXACT or any(
-        name.startswith(p) for p in OPENAI_ENTRYPOINTS_PREFIX
-    )
+    return name in OPENAI_ENTRYPOINTS_EXACT or any(name.startswith(p) for p in OPENAI_ENTRYPOINTS_PREFIX)
 
 
 def pick_reroute(name: str) -> str:
@@ -109,9 +110,7 @@ def _load_graph_schema(path: str) -> Dict[str, Any]:
         raise RuntimeError("[FATAL][TokenCap] graph_schema.json invalid: not an object")
 
     if "type" not in schema or "properties" not in schema or "required" not in schema:
-        raise RuntimeError(
-            "[FATAL][TokenCap] graph_schema.json invalid: missing keys (type/properties/required)"
-        )
+        raise RuntimeError("[FATAL][TokenCap] graph_schema.json invalid: missing keys (type/properties/required)")
 
     props = schema.get("properties", {})
     req = schema.get("required", [])
@@ -119,28 +118,23 @@ def _load_graph_schema(path: str) -> Dict[str, Any]:
         raise RuntimeError("[FATAL][TokenCap] graph_schema.json invalid: properties/required types")
 
     if "nodes" not in props or "edges" not in props:
-        raise RuntimeError(
-            "[FATAL][TokenCap] graph_schema.json invalid: missing properties.nodes/edges"
-        )
+        raise RuntimeError("[FATAL][TokenCap] graph_schema.json invalid: missing properties.nodes/edges")
 
     if "nodes" not in req or "edges" not in req:
-        raise RuntimeError(
-            "[FATAL][TokenCap] graph_schema.json invalid: required must include nodes/edges"
-        )
+        raise RuntimeError("[FATAL][TokenCap] graph_schema.json invalid: required must include nodes/edges")
 
     return schema
 
 
-async def _try_redis_connect(
-    url: str, retries: int = 3, delay: float = 0.5
-) -> Optional[redis.Redis]:
+async def _try_redis_connect(url: str, retries: int = 3, delay: float = 0.5) -> Optional[redis.Redis]:
     """Attempt to create a Redis client and verify connectivity.
 
     Returns a connected Redis client on success, otherwise None after retries.
     """
     for attempt in range(1, retries + 1):
         try:
-            r = await redis.from_url(url, decode_responses=True)
+            # from_url returns a client instance (not a coroutine)
+            r: redis.Redis = redis.from_url(url, decode_responses=True)
             # Verify connection
             await r.ping()
             return r
@@ -180,7 +174,7 @@ def _looks_like_graph_call(data: Dict[str, Any]) -> bool:
 GRAPH_JSON_SCHEMA = _load_graph_schema(GRAPH_SCHEMA_PATH)
 
 
-class TokenCap(CustomLogger):
+class TokenCap(_CustomLogger):
     def __init__(self):
         self._r: Optional[redis.Redis] = None
 
@@ -188,7 +182,7 @@ class TokenCap(CustomLogger):
         """Return a cached redis client or try to connect. Returns None if unavailable."""
         if self._r is not None:
             return self._r
-        r = await _try_redis_connect(REDIS_URL)
+        r: Optional[redis.Redis] = await _try_redis_connect(REDIS_URL)
         if r is not None:
             self._r = r
         return self._r
@@ -259,9 +253,7 @@ class TokenCap(CustomLogger):
             def _needs_reroute(m: str) -> bool:
                 if is_openai_entrypoint(m):
                     return True
-                if OPENAI_REROUTE_REAL and (
-                    m.lower().startswith("openai/") or is_openai_model_name(m)
-                ):
+                if OPENAI_REROUTE_REAL and (m.lower().startswith("openai/") or is_openai_model_name(m)):
                     return True
                 return False
 
@@ -269,11 +261,7 @@ class TokenCap(CustomLogger):
                 if is_openai_entrypoint(model):
                     new_model = pick_reroute(model)
                 else:
-                    new_model = (
-                        DEFAULT_GRAPH_REROUTE
-                        if _looks_like_graph_call(data)
-                        else DEFAULT_RAG_REROUTE
-                    )
+                    new_model = DEFAULT_GRAPH_REROUTE if _looks_like_graph_call(data) else DEFAULT_RAG_REROUTE
 
                 if not new_model or new_model == model:
                     break
@@ -288,18 +276,12 @@ class TokenCap(CustomLogger):
                     extra={"event": "reroute", "hop": hops, "new_model": new_model},
                 )
 
-            if (
-                model.lower().startswith("openai/") or is_openai_model_name(model)
-            ) and not OPENAI_REROUTE_REAL:
+            if (model.lower().startswith("openai/") or is_openai_model_name(model)) and not OPENAI_REROUTE_REAL:
                 from fastapi import HTTPException
 
-                raise HTTPException(
-                    status_code=429, detail={"error": "OpenAI daily token cap reached"}
-                )
+                raise HTTPException(status_code=429, detail={"error": "OpenAI daily token cap reached"})
 
-        if is_openai_entrypoint(model) and any(
-            model.startswith(p) for p in OPENAI_ENTRYPOINTS_PREFIX
-        ):
+        if is_openai_entrypoint(model) and any(model.startswith(p) for p in OPENAI_ENTRYPOINTS_PREFIX):
             data.setdefault(
                 "response_format",
                 {
@@ -310,9 +292,7 @@ class TokenCap(CustomLogger):
             data["temperature"] = 0
 
             if model.startswith("gemini/"):
-                data.setdefault("extra_body", {}).setdefault(
-                    "response_mime_type", "application/json"
-                )
+                data.setdefault("extra_body", {}).setdefault("response_mime_type", "application/json")
 
             for k in ("generation_config", "max_output_tokens", "response_mime_type"):
                 data.pop(k, None)
@@ -354,9 +334,7 @@ class TokenCap(CustomLogger):
             usage = getattr(response, "usage", {}) or {}
             total = int(usage.get("total_tokens") or 0)
             if total <= 0:
-                total = int(usage.get("prompt_tokens") or 0) + int(
-                    usage.get("completion_tokens") or 0
-                )
+                total = int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
 
             logger.info(
                 "[TokenCap] usage model=%s tokens=%s",

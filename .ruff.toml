@@ -1,5 +1,5 @@
 # Ruff configuration for this repo
-line-length = 140
+line-length = 120
 
 # Target Python version used in containers/CI
 target-version = "py311"

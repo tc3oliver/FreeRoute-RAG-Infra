@@ -1,5 +1,5 @@
 [tool.black]
-line-length = 140
+line-length = 120
 target-version = ["py311"]
 include = '\.pyi?$'
 exclude = '''
@@ -18,7 +18,7 @@ exclude = '''
 
 [tool.isort]
 profile = "black"
-line_length = 100
+line_length = 120
 multi_line_output = 3
 src_paths = ["services/gateway", "services/reranker", "integrations"]
 

@@ -1,12 +1,14 @@
 # Development & test dependencies
 pytest
 pytest-asyncio
+pytest-cov
 requests
 redis
 fastapi
 jsonschema
 openai
 pydantic
+types-requests
 
 # Formatters / linters (for dev installs only; pre-commit installs their pinned versions)
 ruff
