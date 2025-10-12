@@ -394,6 +394,23 @@ pytest -q tests/gateway
 pytest -q tests/reranker
 ```
 
+## Developer setup & pre-commit (short)
+
+We recommend installing development and test dependencies locally to speed up development and avoid the pre-commit hooks downloading many packages on first run:
+
+```bash
+# Install development dependencies (run once on your dev machine)
+pip install -r requirements-dev.txt
+
+# Install pre-commit hooks (registers hooks in .git/hooks)
+pip install pre-commit
+pre-commit install
+```
+
+Note: On the first run on a machine, the pre-commit hook's isolated venv may download the packages listed in `requirements-dev.txt`, which can make that commit slower. To skip hooks temporarily, use `git commit --no-verify` (use sparingly).
+
+If running the full test suite on every commit is too slow for your workflow, consider running tests at push time or configuring the pre-commit hook to run a smaller subset of checks.
+
 ## Troubleshooting
 
 GPU / platform differences:

@@ -412,6 +412,23 @@ pytest -q tests/gateway
 pytest -q tests/reranker
 ```
 
+## 開發環境與 pre-commit（簡短說明）
+
+建議在本機先安裝開發與測試所需套件，以加速開發並避免 pre-commit 第一次執行時下載大量依賴：
+
+```bash
+# 安裝開發依賴（只需在開發機執行一次）
+pip install -r requirements-dev.txt
+
+# 安裝 pre-commit hooks（會在 .git/hooks 中註冊）
+pip install pre-commit
+pre-commit install
+```
+
+注意：第一次在某台機器上執行 pre-commit 時，hooks 的隔離 venv 可能會下載 `requirements-dev.txt` 中列出的套件，導致該 commit 較慢。若想暫時略過 hooks，可使用 `git commit --no-verify`（僅在特殊情況下使用）。
+
+若覺得每次 commit 跑完整測試太慢，可考慮改為在 push 階段執行或在 pre-commit 只跑輕量檢查。
+
 ## 疑難排解
 
 GPU / 平台差異：
