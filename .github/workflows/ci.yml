@@ -28,6 +28,9 @@ jobs:
           # Install gateway runtime/test dependencies so tests that import gateway packages
           # (eg. httpx, fastapi, uvicorn) run in the CI test environment.
           pip install -r services/gateway/requirements.txt || true
+          # Install development/test dependencies (redis, etc.) so unit tests and plugin imports
+          # that rely on dev packages succeed during CI collection/run.
+          pip install -r requirements-dev.txt || true
           # Optional heavy runtime deps (non-fatal); kept separate to avoid failing lint/tests
           pip install transformers sentence-transformers torch --only-binary=:all: || true
 
