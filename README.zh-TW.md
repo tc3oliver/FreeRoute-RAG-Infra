@@ -32,41 +32,59 @@ FreeRoute RAG Infra 是一套可本機部署的 RAG/GraphRAG 基礎設施，目�
 ## 目錄
 
 - [專案簡介](#專案簡介)
-- [概觀](#概觀)
-- [功能](#功能)
-- [架構](#架構)
-- [需求](#需求)
-- [快速開始](#快速開始)
-- [設定與環境變數](#設定與環境變數)
-- [服務與埠號](#服務與埠號)
-- [免費額度與來源](#免費額度與來源)
-- [模型入口與路由](#模型入口與路由)
-- [API](#api)
-- [Graph Schema](#graph-schema)
-- [Reranker 與 Embeddings](#reranker-與-embeddings)
-- [測試](#測試)
-- [疑難排解](#疑難排解)
-- [專案結構](#專案結構)
-- [授權](#授權)
+## 快速開始
 
-## 概觀
+1) 建立 `.env`（示例）：
 
-FreeRoute RAG Infra 提供可直接部署的檢索增強生成（RAG）與 GraphRAG 執行環境，重點在於：
+```bash
+# .env（示例）
+OPENAI_API_KEY=...
+GOOGLE_API_KEY=...
+OPENROUTER_API_KEY=...
+GROQ_API_KEY=...
+# 可選：API_GATEWAY_KEYS=dev-key,another-key
+```
 
-- LangChain/OpenAI API 相容；可作為私有 LLM API Proxy 使用。
-- 多供應商容錯與改道（OpenAI 達 TPD/錯誤時自動切換至 Gemini/Groq/OpenRouter）。
-- Gateway 層提供 JSON 模式、Graph 抽取流程、Schema 驗證與修復。
-- TokenCap 控制每日 OpenAI Token，搭配 Redis 計數與 Dashboard 視覺化。
+2) 使用 Docker Compose 啟動（建議）：
 
-## 功能
+```bash
+docker compose up -d --build
+```
 
-- OpenAI 相容 API（LiteLLM Proxy）
-- API Gateway：/chat、/embed、/rerank、/graph/extract
-- 本地 Embeddings：Ollama bge-m3
-- 本地 Reranker：BAAI/bge-reranker-v2-m3（支援 GPU）
-- TokenCap：每日 Token 限額、跨供應商自動改道
-- Dashboard UI：請求、錯誤、用量觀測
+3) 健康檢查：
 
+```bash
+curl -s http://localhost:9400/health || curl -s http://localhost:9400/health/readiness | jq
+curl -s http://localhost:9800/health | jq
+```
+
+4) Dashboard（LiteLLM UI）：
+
+- URL: http://localhost:9400/ui
+- 預設帳密：admin / admin123（請儘速修改）
+
+首次啟動注意事項：
+
+- Ollama 會自動拉取 `bge-m3` 模型；Reranker 在首次啟動時會下載 `BAAI/bge-reranker-v2-m3`，可能需數分鐘。
+- Docker Compose 會建立持久卷，如 `ollama_models` 與 `reranker_models`。
+
+開發者快速啟動（使用 repo 的 .venv）：
+
+```bash
+# 建立虛擬環境（若尚未建立）
+python -m venv .venv
+source .venv/bin/activate
+# 安裝執行與開發依賴
+pip install -r services/gateway/requirements.txt
+pip install -r requirements-dev.txt
+```
+
+本機啟動 Gateway（開發用）：
+
+```bash
+# 於專案根目錄執行
+PYTHONPATH=$(pwd) .venv/bin/uvicorn services.gateway.app:app --reload --port 9800
+```
 ## 對象
 
 - 想以最低成本驗證 RAG/GraphRAG 的個人與團隊
@@ -81,7 +99,7 @@ flowchart TB
     FE["Web / API Client"]
   end
 
-  subgraph GATEWAY["API Gateway (8000)"]
+  subgraph GATEWAY["API Gateway (9800)"]
     G1["/chat"]
     G2["/graph/extract"]
     G3["/embed"]
@@ -89,7 +107,7 @@ flowchart TB
   end
 
   subgraph CORE["FreeRoute RAG Infra Core"]
-    subgraph LITELLM["LiteLLM Proxy (4000)"]
+  subgraph LITELLM["LiteLLM Proxy (9400)"]
       TOK["TokenCap"]
       LDB[("Dashboard UI")]
     end
@@ -126,7 +144,7 @@ flowchart TB
   LITELLM --> GRQ
 ```
 
-備註：LangChain 建議直連 LiteLLM（4000）。前端或應用層流程走 API Gateway（8000）。
+備註：LangChain 建議直連 LiteLLM（9400）。前端或應用層流程走 API Gateway（9800）。
 
 ## 需求
 
@@ -155,13 +173,13 @@ docker compose up -d --build
 3) 健康檢查
 
 ```bash
-curl -s http://localhost:4000/health || curl -s http://localhost:4000/health/readiness | jq
-curl -s http://localhost:8000/health | jq
+curl -s http://localhost:9400/health || curl -s http://localhost:9400/health/readiness | jq
+curl -s http://localhost:9800/health | jq
 ```
 
 4) Dashboard
 
-- URL: http://localhost:4000/ui
+-- URL: http://localhost:9400/ui
 - 預設帳密：admin / admin123（請儘速修改）
 
 首次啟動注意事項：
@@ -192,7 +210,7 @@ API Gateway 補充環境變數：
 - LITELLM_BASE（預設 http://litellm:4000/v1）：Gateway 代理至 LiteLLM 的 Base URL
 - LITELLM_KEY（預設 sk-admin）：Gateway 代理用的管理金鑰
 - RERANKER_URL（預設 http://reranker:8080；若未設，程式預設 80）：重排服務 URL
-- GRAPH_SCHEMA_PATH（預設 `api-gateway/graph_schema.json`）：Gateway 與 TokenCap 共用
+- GRAPH_SCHEMA_PATH（預設 `/app/schemas/graph_schema.json`）：Gateway 與 TokenCap 共用（由 `./schemas/graph_schema.json` 掛載）
 - GRAPH_MIN_NODES / GRAPH_MIN_EDGES（預設 1 / 1）：/graph/extract 最小門檻
 - GRAPH_ALLOW_EMPTY（預設 false）：是否允許空結果通過
 - GRAPH_MAX_ATTEMPTS（預設 2）：每個 provider 嘗試次數（strict → nudge）
@@ -207,11 +225,11 @@ API Gateway 補充環境變數：
 
 | 服務 | 埠 | 說明 |
 | --- | ---: | --- |
-| LiteLLM Proxy | 4000 | OpenAI 相容 API（給 LangChain/SDK） |
-| Dashboard UI | 4000 | http://localhost:4000/ui |
-| API Gateway | 8000 | /chat /embed /rerank /graph/extract |
-| Reranker | 8080 | POST /rerank（bge-reranker-v2-m3） |
-| Ollama | 11434 | bge-m3 embeddings |
+| LiteLLM Proxy | 9400 | OpenAI 相容 API（給 LangChain/SDK） |
+| Dashboard UI | 9400 | http://localhost:9400/ui |
+| API Gateway | 9800 | /chat /embed /rerank /graph/extract |
+| Reranker | 9080 | POST /rerank（bge-reranker-v2-m3） |
+| Ollama | 9143 | bge-m3 embeddings |
 | Redis | 6379 | Token 計數/快取 |
 | Postgres | 5432 | 內部用途，預設不對外 |
 
@@ -289,7 +307,7 @@ Embeddings / Rerank：
 
 LiteLLM（統一 API）
 
-- Base URL：`http://localhost:4000/v1`
+- Base URL：`http://localhost:9400/v1`
 - Auth：`Authorization: Bearer <LITELLM_MASTER_KEY>`
 
 範例（Python / LangChain）
@@ -297,8 +315,8 @@ LiteLLM（統一 API）
 ```python
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-llm = ChatOpenAI(base_url="http://localhost:4000/v1", api_key="sk-admin", model="rag-answer", temperature=0.2)
-emb = OpenAIEmbeddings(base_url="http://localhost:4000/v1", api_key="sk-admin", model="local-embed")
+llm = ChatOpenAI(base_url="http://localhost:9400/v1", api_key="sk-admin", model="rag-answer", temperature=0.2)
+emb = OpenAIEmbeddings(base_url="http://localhost:9400/v1", api_key="sk-admin", model="local-embed")
 
 print(llm.invoke("用三行說明 RAG").content)
 print(len(emb.embed_query("GraphRAG 與 RAG 差異")))
@@ -307,7 +325,7 @@ print(len(emb.embed_query("GraphRAG 與 RAG 差異")))
 OpenAI 相容 REST
 
 ```bash
-curl -s http://localhost:4000/v1/chat/completions \
+curl -s http://localhost:9400/v1/chat/completions \
   -H "Authorization: Bearer sk-admin" \
   -H "Content-Type: application/json" \
   -d '{"model":"rag-answer","messages":[{"role":"user","content":"列出三點 RAG 優點"}]}'
@@ -315,7 +333,7 @@ curl -s http://localhost:4000/v1/chat/completions \
 
 API Gateway（應用層）
 
-- Base：`http://localhost:8000`
+- Base：`http://localhost:9800`
 - Auth：`X-API-Key: <key>`（預設 dev-key，可透過 `API_GATEWAY_KEYS` 調整）
 
 路由一覽：
@@ -335,27 +353,28 @@ API Gateway（應用層）
 # /chat
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"請用 JSON 回答兩點優點"}],"json_mode":true,"temperature":0.2}' \
-  http://localhost:8000/chat | jq
+  http://localhost:9800/chat | jq
 
 # /embed
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"texts":["RAG 是什麼？","GraphRAG 是什麼？"]}' \
-  http://localhost:8000/embed | jq
+  http://localhost:9800/embed | jq
 
 # /rerank
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"query":"生成式 AI 是什麼？","documents":["AI 是人工智慧","生成式 AI 可產生內容"],"top_n":2}' \
-  http://localhost:8000/rerank | jq
+  http://localhost:9800/rerank | jq
 
 # /graph/probe（輕量探測，不驗 schema）
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"model":"graph-extractor","strict_json":true}' \
-  http://localhost:8000/graph/probe | jq
+  http://localhost:9800/graph/probe | jq
 ```
 
 ## Graph Schema
 
-- 路徑：`api-gateway/graph_schema.json`
+- Repo 路徑：`schemas/graph_schema.json`
+- 容器路徑：`/app/schemas/graph_schema.json`（由 docker-compose 掛載）
 - 頂層結構：
 
 ```json
@@ -378,7 +397,7 @@ Graph 抽取端點（建議走 Gateway）：
 ```bash
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"context":"Alice 於 2022 年加入 Acme 擔任工程師；Acme 總部在台北，創辦人 Bob。"}' \
-  http://localhost:8000/graph/extract | jq
+  http://localhost:9800/graph/extract | jq
 ```
 
 常用參數：
@@ -398,61 +417,79 @@ Embeddings（Ollama bge-m3）
 
 Reranker（bge-reranker-v2-m3）
 
-- 直接端點：`POST http://localhost:8080/rerank`
-- 經由 Gateway：`POST http://localhost:8000/rerank`
+-- 直接端點：`POST http://localhost:9080/rerank`
+-- 經由 Gateway：`POST http://localhost:9800/rerank`
 - 回傳格式：`{"ok": true, "results": [{"index": 1, "score": 0.83, "text": "..."}]}`
 
 ## 測試
 
-在專案根目錄：
+Unit 測試（快速，無外部服務需求）：
 
 ```bash
-python test_models.py
-python test_gateway.py
+# 於 repo 根目錄，確保 PYTHONPATH 包含專案
+PYTHONPATH=$(pwd) .venv/bin/pytest -q tests/unit
 ```
 
-啟動後快速測試說明：
-
-- LiteLLM 連通性與模型入口檢查（test_models.py）
-  - 會對 rag-answer、graph-extractor*、local-embed 進行基本呼叫
-  - 可用環境變數覆寫預設值：
-    - LITELLM_BASE（預設 http://localhost:4000/v1）
-    - LITELLM_KEY（預設 sk-admin）
-  - 範例：
+Integration / smoke 測試（需透過 Docker Compose 啟動服務）：
 
 ```bash
-# 基本連通測試（預設直連 http://localhost:4000/v1，以 sk-admin 測試）
-python test_models.py
-
-# 僅在 Graph 測試對 OpenAI 相容端開啟嚴格 JSON 驗證
-python test_models.py --strict-json
+docker compose up -d --build
+PYTHONPATH=$(pwd) .venv/bin/pytest -q tests/integration
 ```
 
-- API Gateway 端對外路由檢查（test_gateway.py）
-  - 會依序呼叫 /health、/whoami、/chat、/embed、/rerank、/graph/extract（可選略 graph）
-  - 可用環境變數覆寫預設值：
-    - API_GATEWAY_BASE（預設 http://localhost:8000）
-    - API_GATEWAY_KEY（預設 dev-key）
-    - API_GATEWAY_AUTH_HEADER（預設 X-API-Key，可改 Authorization）
-  - 常用參數：
-    - --only health|whoami|chat|embed|rerank|graph（只跑單一測試）
-    - --skip-graph（略過 /graph/extract 測試）
-    - --auth-header X-API-Key|Authorization（切換驗證標頭）
-  - 範例：
+如果不使用 repo 的 .venv，請先 `pip install -r requirements-dev.txt`。
+
+測試小提示：
+
+- 在 repo 根目錄執行 pytest 時，使用 `PYTHONPATH=$(pwd)` 以便 `services.*` 匯入能被解析。
+- 執行單一測試檔：`PYTHONPATH=$(pwd) .venv/bin/pytest tests/unit/test_gateway_graph_extract.py -q`。
+
+## Metrics (Prometheus)
+
+API Gateway 提供一個可選的 `/metrics` 端點（於安裝 `prometheus-client` 時啟用）。
+
+安裝方式（本機或 CI）：
 
 ```bash
-# 跑完整測試（使用預設 BASE/KEY）
-python test_gateway.py
-
-# 只測 /health
-python test_gateway.py --only health
-
-# 使用 Authorization: Bearer <key> 模式測試 /chat
-API_GATEWAY_KEY=dev-key python test_gateway.py --only chat --auth-header Authorization
-
-# 略過 /graph/extract 測試（其餘全部跑）
-python test_gateway.py --skip-graph
+pip install prometheus-client
 ```
+
+行為說明：
+
+- 若安裝 `prometheus-client`，`/metrics` 會回傳 Prometheus 格式的指標。Gateway 會收集每個路徑的請求數與請求延遲。
+- 若未安裝，`/metrics` 會回 204，方便在最小部署或 CI 中探測。
+
+Prometheus scraping 範例（prometheus.yml 的 `scrape_configs`）：
+
+```yaml
+- job_name: 'free-rag-gateway'
+  static_configs:
+    - targets: ['host.docker.internal:9800']
+      labels:
+        service: gateway
+```
+
+備註：
+
+- Gateway 使用 module-local CollectorRegistry（避免在測試或模組重載時重複註冊指標）
+- 建議在 CI 的測試步驟中安裝 `prometheus-client` 來驗證 metrics 行為
+
+## 開發環境與 pre-commit（簡短說明）
+
+建議在本機先安裝開發與測試所需套件，以加速開發並避免 pre-commit 第一次執行時下載大量依賴：
+
+```bash
+# 安裝開發依賴（只需在開發機執行一次）
+pip install -r requirements-dev.txt
+
+# 安裝 pre-commit hooks（會在 .git/hooks 中註冊）
+pip install pre-commit
+pre-commit install
+```
+
+注意：第一次在某台機器上執行 pre-commit 時，hooks 的隔離 venv 可能會下載 `requirements-dev.txt` 中列出的套件，導致該 commit 較慢。若想暫時略過 hooks，可使用 `git commit --no-verify`（僅在特殊情況下使用）。
+
+若覺得每次 commit 跑完整測試太慢，可考慮改為在 push 階段執行或在 pre-commit 只跑輕量檢查。
 
 ## 疑難排解
 
@@ -475,7 +512,7 @@ JSON 模式錯誤：
 
 Graph 抽取空內容/非法 JSON：
 
-- Gateway 會嘗試修正與正規化，仍失敗回 422 並附 provider 嘗試清單。確認 `api-gateway/graph_schema.json` 有效。
+- Gateway 會嘗試修正與正規化，仍失敗回 422 並附 provider 嘗試清單。確認 `schemas/graph_schema.json` 有效。
 
 已達 TPD 仍走 OpenAI：
 
@@ -485,20 +522,30 @@ Graph 抽取空內容/非法 JSON：
 
 ```
 .
-├─ api-gateway/
-│  ├─ app.py                 # Gateway 主程式：/chat /embed /rerank /graph/extract
-│  ├─ graph_schema.json      # Graph JSON Schema（單一真相）
-│  └─ requirements.txt
+├─ services/
+│  ├─ gateway/               # API Gateway（FastAPI）
+│  │  ├─ app.py
+│  │  └─ requirements.txt
+│  └─ reranker/              # PyTorch Reranker（FastAPI）
+│     └─ server.py
+├─ integrations/
+│  └─ litellm/
+│     └─ plugins/
+│        └─ token_cap.py     # TokenCap：TPD + 改道 + Schema 注入
 ├─ containers/
+│  ├─ gateway/Dockerfile     # Gateway 容器
 │  └─ litellm/Dockerfile     # LiteLLM 容器
-├─ plugins/
-│  └─ token_cap.py           # TokenCap：TPD + 改道 + Schema 注入
-├─ pyreranker/
-│  └─ server.py              # Reranker API（bge-reranker-v2-m3）
-├─ litellm.config.yaml       # 模型入口與路由策略
+├─ schemas/
+│  └─ graph_schema.json      # Graph JSON Schema（掛載到 /app/schemas）
+├─ configs/
+│  └─ litellm.config.yaml    # 模型入口與路由策略
+├─ tests/
+│  ├─ gateway/test_gateway.py
+│  └─ reranker/test_reranker.py
 ├─ docker-compose.yml        # 一鍵部署
-├─ test_gateway.py           # Gateway 測試
-└─ test_models.py            # LiteLLM 測試
+├─ pyproject.toml
+├─ README.md / README.zh-TW.md / ROADMAP.md
+└─ ...
 ```
 
 ## 授權

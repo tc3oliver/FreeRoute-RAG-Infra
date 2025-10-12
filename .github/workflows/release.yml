@@ -32,8 +32,8 @@ jobs:
       - name: Build API Gateway image
         uses: docker/build-push-action@v6
         with:
-          context: ./api-gateway
-          file: ./api-gateway/Dockerfile
+          context: .
+          file: ./containers/gateway/Dockerfile
           push: false
           load: false
       - name: Build LiteLLM container

@@ -1,0 +1,16 @@
+# Development & test dependencies
+pytest
+pytest-asyncio
+pytest-cov
+requests
+redis
+fastapi
+jsonschema
+openai
+pydantic
+types-requests
+
+# Formatters / linters (for dev installs only; pre-commit installs their pinned versions)
+ruff
+black==24.8.0
+isort==5.13.2

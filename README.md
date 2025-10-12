@@ -20,44 +20,61 @@ Zero-Cost RAG/GraphRAG Infrastructure — LangChain Compatible
 FreeRoute RAG Infra is a locally deployable RAG/GraphRAG infrastructure designed to help developers build and test with zero cost whenever possible (Free-first). It prioritizes free or low-cost providers, falls back when quotas are hit, and includes local components.
 
 Highlights:
+Quick start (local)
 
-- Free-first routing: Prefer free or low-cost providers. When OpenAI hits daily token caps (TPD) or errors occur, automatically reroute to Gemini / Groq / OpenRouter. Local embeddings via Ollama.
-- Standard interfaces: LiteLLM exposes OpenAI-compatible endpoints (for LangChain/SDK). API Gateway provides /chat, /embed, /rerank, /graph/extract.
-- Local capabilities: Embeddings via Ollama (bge-m3), reranking via bge-reranker-v2-m3, optional GPU.
-- Observability & governance: TokenCap (daily OpenAI token limits and accounting), Redis, Dashboard UI.
-- GraphRAG: Extraction plus JSON Schema validation/repair. Structure maps cleanly to Neo4j/GraphDB style.
+1) Create a `.env` file (example):
 
-Use cases: Individual/team Dev/Test, private LLM API proxy, workshops/courses, RAG/GraphRAG PoC.
+```bash
+# .env (example)
+OPENAI_API_KEY=...
+GOOGLE_API_KEY=...
+OPENROUTER_API_KEY=...
+GROQ_API_KEY=...
+# Optional: API_GATEWAY_KEYS=dev-key,another-key
+```
 
-## Table of contents
+2) Start with Docker Compose (recommended):
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Features](#features)
-- [Requirements](#requirements)
-- [Quick start](#quick-start)
-- [Configuration](#configuration)
-- [Services and ports](#services-and-ports)
-- [Free tiers and sources](#free-tiers-and-sources)
-- [Model entrypoints and routing](#model-entrypoints-and-routing)
-- [API](#api)
-- [Graph Schema](#graph-schema)
-- [Reranker and embeddings](#reranker-and-embeddings)
-- [Testing](#testing)
-- [Troubleshooting](#troubleshooting)
-- [Project structure](#project-structure)
-- [License](#license)
+```bash
+docker compose up -d --build
+```
 
-## Architecture
+3) Health checks:
 
-```mermaid
-flowchart TB
-  subgraph CLIENT["Client Applications"]
-    LC["LangChain / SDK"]
+```bash
+curl -s http://localhost:9400/health || curl -s http://localhost:9400/health/readiness | jq
+curl -s http://localhost:9800/health | jq
+```
+
+4) Dashboard (LiteLLM UI):
+
+- URL: http://localhost:9400/ui
+- Default credentials: admin / admin123 (change ASAP)
+
+Notes:
+
+- Ollama will pull the `bge-m3` model automatically. The reranker downloads `BAAI/bge-reranker-v2-m3` on first run; this can take several minutes.
+- Persistent volumes used by the compose setup include `ollama_models` and `reranker_models`.
+
+Developer quick start (using the repo `.venv`):
+
+```bash
+# create venv (if not present)
+python -m venv .venv
+source .venv/bin/activate
+# install runtime + dev requirements
+pip install -r services/gateway/requirements.txt
+pip install -r requirements-dev.txt
+```
+
+Run the gateway locally (for development):
+
+```bash
     FE["Web / API Client"]
   end
+```
 
-  subgraph GATEWAY["API Gateway (8000)"]
+  subgraph GATEWAY["API Gateway (9800)"]
     G1["/chat"]
     G2["/graph/extract"]
     G3["/embed"]
@@ -65,7 +82,7 @@ flowchart TB
   end
 
   subgraph CORE["FreeRoute RAG Infra Core"]
-    subgraph LITELLM["LiteLLM Proxy (4000)"]
+  subgraph LITELLM["LiteLLM Proxy (9400)"]
       TOK["TokenCap"]
       LDB[("Dashboard UI")]
     end
@@ -102,7 +119,7 @@ flowchart TB
   LITELLM --> GRQ
 ```
 
-Note: LangChain is recommended to connect directly to LiteLLM (4000). Application flows for end users can go through the API Gateway (8000).
+Note: LangChain is recommended to connect directly to LiteLLM (9400). Application flows for end users can go through the API Gateway (9800).
 
 ## Features
 
@@ -140,13 +157,13 @@ docker compose up -d --build
 3) Health checks
 
 ```bash
-curl -s http://localhost:4000/health || curl -s http://localhost:4000/health/readiness | jq
-curl -s http://localhost:8000/health | jq
+curl -s http://localhost:9400/health || curl -s http://localhost:9400/health/readiness | jq
+curl -s http://localhost:9800/health | jq
 ```
 
 4) Dashboard
 
-- URL: http://localhost:4000/ui
+-- URL: http://localhost:9400/ui
 - Default credentials: admin / admin123 (change ASAP)
 
 First run notes:
@@ -177,7 +194,7 @@ API Gateway extras:
 - LITELLM_BASE (default http://litellm:4000/v1): Base URL to talk to LiteLLM
 - LITELLM_KEY (default sk-admin): Admin key used by the Gateway when calling LiteLLM
 - RERANKER_URL (default http://reranker:8080; if unset, app defaults to 80): Reranker URL
-- GRAPH_SCHEMA_PATH (default `api-gateway/graph_schema.json`): Shared Graph Schema
+- GRAPH_SCHEMA_PATH (default `/app/schemas/graph_schema.json`): Shared Graph Schema (mounted from `./schemas/graph_schema.json`)
 - GRAPH_MIN_NODES / GRAPH_MIN_EDGES (default 1 / 1): /graph/extract thresholds
 - GRAPH_ALLOW_EMPTY (default false): Allow empty output to pass thresholds
 - GRAPH_MAX_ATTEMPTS (default 2): Attempts per provider (strict → nudge)
@@ -192,11 +209,11 @@ Cost protection:
 
 | Service | Port | Description |
 | --- | ---: | --- |
-| LiteLLM Proxy | 4000 | OpenAI-compatible API (for LangChain/SDK) |
-| Dashboard UI | 4000 | http://localhost:4000/ui |
-| API Gateway | 8000 | /chat /embed /rerank /graph/extract |
-| Reranker | 8080 | POST /rerank (bge-reranker-v2-m3) |
-| Ollama | 11434 | bge-m3 embeddings |
+| LiteLLM Proxy | 9400 | OpenAI-compatible API (for LangChain/SDK) |
+| Dashboard UI | 9400 | http://localhost:9400/ui |
+| API Gateway | 9800 | /chat /embed /rerank /graph/extract |
+| Reranker | 9080 | POST /rerank (bge-reranker-v2-m3) |
+| Ollama | 9143 | bge-m3 embeddings |
 | Redis | 6379 | Token counters / cache |
 | Postgres | 5432 | Internal by default (not exposed) |
 
@@ -233,7 +250,7 @@ Default policy: Prefer free or low-cost providers. When OpenAI hits daily token 
 
 ## Model entrypoints and routing
 
-Defined in `litellm.config.yaml`.
+Defined in `configs/litellm.config.yaml`.
 
 Chat / inference:
 
@@ -271,7 +288,7 @@ Routing strategy (TokenCap):
 
 LiteLLM (unified API)
 
-- Base URL: `http://localhost:4000/v1`
+- Base URL: `http://localhost:9400/v1`
 - Auth: `Authorization: Bearer <LITELLM_MASTER_KEY>`
 
 Example (Python / LangChain):
@@ -279,8 +296,8 @@ Example (Python / LangChain):
 ```python
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-llm = ChatOpenAI(base_url="http://localhost:4000/v1", api_key="sk-admin", model="rag-answer", temperature=0.2)
-emb = OpenAIEmbeddings(base_url="http://localhost:4000/v1", api_key="sk-admin", model="local-embed")
+llm = ChatOpenAI(base_url="http://localhost:9400/v1", api_key="sk-admin", model="rag-answer", temperature=0.2)
+emb = OpenAIEmbeddings(base_url="http://localhost:9400/v1", api_key="sk-admin", model="local-embed")
 
 print(llm.invoke("Explain RAG in three lines").content)
 print(len(emb.embed_query("Key differences between GraphRAG and RAG")))
@@ -289,7 +306,7 @@ print(len(emb.embed_query("Key differences between GraphRAG and RAG")))
 OpenAI-compatible REST:
 
 ```bash
-curl -s http://localhost:4000/v1/chat/completions \
+curl -s http://localhost:9400/v1/chat/completions \
   -H "Authorization: Bearer sk-admin" \
   -H "Content-Type: application/json" \
   -d '{"model":"rag-answer","messages":[{"role":"user","content":"List three advantages of RAG"}]}'
@@ -297,7 +314,7 @@ curl -s http://localhost:4000/v1/chat/completions \
 
 API Gateway (app layer)
 
-- Base: `http://localhost:8000`
+- Base: `http://localhost:9800`
 - Auth: `X-API-Key: <key>` (default dev-key; set via `API_GATEWAY_KEYS`)
 
 Endpoints:
@@ -317,27 +334,28 @@ Examples:
 # /chat
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"Reply in JSON with two bullet points of benefits"}],"json_mode":true,"temperature":0.2}' \
-  http://localhost:8000/chat | jq
+  http://localhost:9800/chat | jq
 
 # /embed
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"texts":["What is RAG?","What is GraphRAG?"]}' \
-  http://localhost:8000/embed | jq
+  http://localhost:9800/embed | jq
 
 # /rerank
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"query":"What is generative AI?","documents":["AI is artificial intelligence","Generative AI can create content"],"top_n":2}' \
-  http://localhost:8000/rerank | jq
+  http://localhost:9800/rerank | jq
 
 # /graph/probe (lightweight probe, no schema validation)
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"model":"graph-extractor","strict_json":true}' \
-  http://localhost:8000/graph/probe | jq
+  http://localhost:9800/graph/probe | jq
 ```
 
 ## Graph Schema
 
-- Path: `api-gateway/graph_schema.json`
+- Repo path: `schemas/graph_schema.json`
+- Container path: `/app/schemas/graph_schema.json` (mounted via docker-compose)
 - Top-level shape:
 
 ```json
@@ -360,7 +378,7 @@ Graph extraction (recommended via Gateway):
 ```bash
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"context":"Alice joined Acme in 2022 as an engineer; Acme HQ is in Taipei, founded by Bob."}' \
-  http://localhost:8000/graph/extract | jq
+  http://localhost:9800/graph/extract | jq
 ```
 
 Common parameters:
@@ -380,61 +398,76 @@ Embeddings (Ollama bge-m3)
 
 Reranker (bge-reranker-v2-m3)
 
-- Direct endpoint: `POST http://localhost:8080/rerank`
-- Via Gateway: `POST http://localhost:8000/rerank`
+-- Direct endpoint: `POST http://localhost:9080/rerank`
+-- Via Gateway: `POST http://localhost:9800/rerank`
 - Response: `{"ok": true, "results": [{"index": 1, "score": 0.83, "text": "..."}]}`
 
 ## Testing
 
-From the project root:
+Unit tests (fast, no external services):
 
 ```bash
-python test_models.py
-python test_gateway.py
+# from repo root, ensure PYTHONPATH includes repo
+PYTHONPATH=$(pwd) .venv/bin/pytest -q tests/unit
 ```
 
-Post-start testing notes:
-
-- LiteLLM connectivity & entrypoints (test_models.py)
-  - Calls rag-answer, graph-extractor*, local-embed
-  - Overridable env vars:
-    - LITELLM_BASE (default http://localhost:4000/v1)
-    - LITELLM_KEY (default sk-admin)
-  - Examples:
+Integration and smoke tests (requires services running via Docker Compose):
 
 ```bash
-# Basic connectivity (default base http://localhost:4000/v1, key sk-admin)
-python test_models.py
-
-# Enable strict JSON validation for graph tests
-python test_models.py --strict-json
+docker compose up -d --build
+PYTHONPATH=$(pwd) .venv/bin/pytest -q tests/integration
 ```
 
-- API Gateway routes (test_gateway.py)
-  - Calls /health, /whoami, /chat, /embed, /rerank, /graph/extract (graph optional)
-  - Overridable env vars:
-    - API_GATEWAY_BASE (default http://localhost:8000)
-    - API_GATEWAY_KEY (default dev-key)
-    - API_GATEWAY_AUTH_HEADER (default X-API-Key; can switch to Authorization)
-  - Common flags:
-    - --only health|whoami|chat|embed|rerank|graph
-    - --skip-graph
-    - --auth-header X-API-Key|Authorization
-  - Examples:
+If you don't use the repo `.venv`, run `pip install -r requirements-dev.txt` first.
+
+Test tips:
+
+- Use `PYTHONPATH=$(pwd)` when running pytest from repo root so `services.*` imports resolve.
+- To run a single test file: `PYTHONPATH=$(pwd) .venv/bin/pytest tests/unit/test_gateway_graph_extract.py -q`.
+
+### Metrics (Prometheus)
+The API Gateway exposes an optional `/metrics` endpoint when the `prometheus-client` package is installed.
+
+Install locally or in CI to enable scraping:
 
 ```bash
-# Full run (using defaults)
-python test_gateway.py
-
-# Only /health
-python test_gateway.py --only health
-
-# Use Authorization: Bearer <key> for /chat
-API_GATEWAY_KEY=dev-key python test_gateway.py --only chat --auth-header Authorization
-
-# Skip /graph/extract, run others
-python test_gateway.py --skip-graph
+pip install prometheus-client
 ```
+
+Behavior:
+- When `prometheus-client` is installed, `/metrics` returns Prometheus-formatted metrics. The gateway collects per-endpoint request counts and request duration.
+- When not installed, `/metrics` returns HTTP 204 so probes remain safe in minimal deployments.
+
+Quick example for Prometheus scraping (Prometheus `scrape_configs`):
+
+```yaml
+- job_name: 'free-rag-gateway'
+  static_configs:
+    - targets: ['host.docker.internal:9800']
+      labels:
+        service: gateway
+```
+
+Notes:
+- The gateway uses a module-local CollectorRegistry to avoid duplicated registration when reloading in tests or during interpreter restarts.
+- You can enable metrics in CI by installing `prometheus-client` in the test step.
+
+## Developer setup & pre-commit (short)
+
+We recommend installing development and test dependencies locally to speed up development and avoid the pre-commit hooks downloading many packages on first run:
+
+```bash
+# Install development dependencies (run once on your dev machine)
+pip install -r requirements-dev.txt
+
+# Install pre-commit hooks (registers hooks in .git/hooks)
+pip install pre-commit
+pre-commit install
+```
+
+Note: On the first run on a machine, the pre-commit hook's isolated venv may download the packages listed in `requirements-dev.txt`, which can make that commit slower. To skip hooks temporarily, use `git commit --no-verify` (use sparingly).
+
+If running the full test suite on every commit is too slow for your workflow, consider running tests at push time or configuring the pre-commit hook to run a smaller subset of checks.
 
 ## Troubleshooting
 
@@ -457,7 +490,7 @@ JSON mode issues:
 
 Graph extraction empty/invalid JSON:
 
-- The Gateway attempts to repair/normalize; if still invalid, it returns 422 with attempts included. Ensure `api-gateway/graph_schema.json` is valid.
+- The Gateway attempts to repair/normalize; if still invalid, it returns 422 with attempts included. Ensure `schemas/graph_schema.json` is valid.
 
 OpenAI calls still used after TPD reached:
 
@@ -467,20 +500,35 @@ OpenAI calls still used after TPD reached:
 
 ```
 .
-├─ api-gateway/
-│  ├─ app.py                 # Gateway app: /chat /embed /rerank /graph/extract
-│  ├─ graph_schema.json      # Graph JSON Schema (single source of truth)
-│  └─ requirements.txt
+├─ services/
+│  ├─ gateway/               # API Gateway (FastAPI)
+│  │  ├─ app.py
+│  │  └─ requirements.txt
+│  └─ reranker/              # PyTorch Reranker (FastAPI)
+│     └─ server.py
+├─ integrations/
+│  └─ litellm/
+│     └─ plugins/
+│        └─ token_cap.py     # TokenCap: TPD + reroute + schema injection
 ├─ containers/
+│  ├─ gateway/Dockerfile     # Gateway container
 │  └─ litellm/Dockerfile     # LiteLLM container
-├─ plugins/
-│  └─ token_cap.py           # TokenCap: TPD + reroute + schema injection
-├─ pyreranker/
-│  └─ server.py              # Reranker API (bge-reranker-v2-m3)
-├─ litellm.config.yaml       # Models and routing strategy
+├─ schemas/
+│  └─ graph_schema.json      # Graph JSON Schema (mounted to /app/schemas)
+├─ configs/
+│  └─ litellm.config.yaml    # LiteLLM models and routing strategy
+├─ tests/
+│  ├─ unit/                      # Fast unit tests (CI default)
+│  │  ├─ test_gateway_handlers.py
+│  │  └─ test_tokencap.py
+│  ├─ integration/               # E2E smoke against running services
+│  │  └─ test_gateway_smoke.py
+│  └─ reranker/
+│     └─ test_reranker.py
 ├─ docker-compose.yml        # One-command deploy
-├─ test_gateway.py           # Gateway tests
-└─ test_models.py            # LiteLLM tests
+├─ pyproject.toml
+├─ README.md / README.zh-TW.md / ROADMAP.md
+└─ ...
 ```
 
 ## License

@@ -24,31 +24,38 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # Lightweight deps for linting & basic runs; project services run in containers locally
-          pip install ruff==0.6.9 pytest==8.3.3
-          # Gateway & reranker optional runtime deps (non-fatal if missing in CI)
-          pip install fastapi uvicorn requests jsonschema transformers sentence-transformers torch --only-binary=:all: || true
+          pip install ruff==0.6.9 pytest==8.3.3 pytest-asyncio requests jsonschema mypy coverage
+          # Install gateway runtime/test dependencies so tests that import gateway packages
+          # (eg. httpx, fastapi, uvicorn) run in the CI test environment.
+          pip install -r services/gateway/requirements.txt || true
+          # Install development/test dependencies (redis, etc.) so unit tests and plugin imports
+          # that rely on dev packages succeed during CI collection/run.
+          pip install -r requirements-dev.txt || true
+          # Optional heavy runtime deps (non-fatal); kept separate to avoid failing lint/tests
+          pip install transformers sentence-transformers torch --only-binary=:all: || true
 
       - name: Lint (ruff)
         run: |
           ruff --version
           ruff check .
 
-      - name: Smoke tests (scripts)
+      - name: Type check (mypy)
+        run: |
+          mypy --version
+          mypy --config-file mypy.ini integrations/litellm/plugins/token_cap.py
+
+      - name: Run unit tests with coverage
         run: |
           python --version
-          # Ensure test scripts import and show help without running services
-          python - <<'PY'
-          import importlib.util, sys
-          for f in ['test_models.py','test_gateway.py']:
-              spec = importlib.util.spec_from_file_location('tmp_mod', f)
-              mod = importlib.util.module_from_spec(spec)
-              try:
-                  spec.loader.exec_module(mod)
-                  print(f"Loaded {f} OK")
-              except Exception as e:
-                  print(f"WARNING: {f} import failed: {e}")
-          print('Smoke OK')
-          PY
+          coverage run -m pytest -q tests/unit
+          coverage xml -o coverage.xml
+          coverage report -m --fail-under=50
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
 
   docker-build:
     name: Build Docker images
@@ -65,8 +72,8 @@ jobs:
       - name: Build API Gateway image
         uses: docker/build-push-action@v6
         with:
-          context: ./api-gateway
-          file: ./api-gateway/Dockerfile
+          context: .
+          file: ./containers/gateway/Dockerfile
           push: false
           load: false
 
