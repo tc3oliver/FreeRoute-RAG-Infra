@@ -48,6 +48,8 @@ services:
     build:
       context: ./containers/litellm
       dockerfile: Dockerfile
+    # Optional: override platform when running on M1/ARM or CI (example: PLATFORM=linux/amd64)
+    platform: ${PLATFORM:-linux/amd64}
       # 確認 Dockerfile 內有：RUN pip install -U "redis>=5"  # CHK
       # platforms: ["linux/amd64"]  # OPT: 若主機是 amd64 才需要
     depends_on:
@@ -95,6 +97,7 @@ services:
   # ─────────────────────────────────────────────────────────
   ollama:
     image: ollama/ollama:latest
+    platform: ${PLATFORM:-linux/amd64}
     environment:
       <<: *common-env
       OLLAMA_KEEP_ALIVE: 24h
@@ -130,6 +133,7 @@ services:
     build:
       context: .
       dockerfile: containers/reranker/Dockerfile
+    platform: ${PLATFORM:-linux/amd64}
     environment:
       <<: *common-env
       TRANSFORMERS_CACHE: /models
@@ -166,6 +170,7 @@ services:
     build:
       context: .
       dockerfile: containers/gateway/Dockerfile
+    platform: ${PLATFORM:-linux/amd64}
     depends_on:
       litellm:
         condition: service_healthy    # CHG: 等 litellm 健康
