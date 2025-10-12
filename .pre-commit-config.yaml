@@ -29,10 +29,10 @@ repos:
     hooks:
       - id: pytest-unit
         name: pytest (unit)
-        # run pytest inside the venv but ensure the repo root is on PYTHONPATH
-        entry: bash -c 'PYTHONPATH="$(pwd)" pytest -q tests/unit'
+        # Install centralized dev dependencies inside the hook venv, then run pytest with repo on PYTHONPATH
+        entry: bash -c 'python -m pip install -r requirements-dev.txt && PYTHONPATH="$(pwd)" pytest -q tests/unit'
         language: python
-        additional_dependencies: ["pytest", "pytest-asyncio", "requests", "redis", "fastapi", "jsonschema", "openai", "pydantic"]
+        # dependencies are installed from requirements-dev.txt inside the hook venv
         always_run: true
         types: [python]
         pass_filenames: false
