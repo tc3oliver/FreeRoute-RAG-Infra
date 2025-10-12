@@ -31,12 +31,28 @@ pre-commit run --all-files
 ```
 
 Tools and config:
-- ruff: lint + format (see .ruff.toml)
-- black: code formatter (see pyproject.toml)
-- isort: import sorter (see pyproject.toml)
 
 CI will also run pre-commit on PRs via .github/workflows/pre-commit.yml.
 
+
+### Pre-commit & running tests on commit
+
+The project config runs a local `pytest` hook during commit so unit tests in `tests/unit` are executed in an isolated venv before the commit completes. Notes:
+
+- Install pre-commit once (per environment):
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+- First commit after installing the hooks may be slower because the hook's venv will download the declared test/runtime dependencies (pytest, pytest-asyncio, openai, redis, requests, ...). This happens only once per machine/hook environment.
+
+- If you need to skip hooks for a quick commit (not recommended for feature branches), use `--no-verify` with `git commit`.
+
+- If running full unit tests on every commit is too slow for your workflow, consider switching the hook to run on push (change `stages: [commit]` to `stages: [push]`) or make the hook run a smaller test subset.
+
+If you want me to update the repo to use pre-push instead of commit-stage tests, tell me and I will change the hook config and update this doc.
 ## Releases and tags
 
 We use tag-driven releases on GitHub.
