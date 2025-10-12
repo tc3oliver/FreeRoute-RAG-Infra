@@ -1,8 +1,15 @@
-# plugins/token_cap.py
+"""
+TokenCap plugin for LiteLLM
+- Enforces daily OpenAI token caps
+- Reroutes OpenAI entrypoints/real model names to free/low-cost backends when capped
+- Injects JSON Schema for graph extraction entrypoints
+Behavior preserved; this file adds typing and clarifying comments.
+"""
+
 import datetime
 import json
 import os
-from typing import Literal
+from typing import Any, Dict, Literal
 
 try:
     from litellm.integrations.custom_logger import CustomLogger
@@ -79,7 +86,7 @@ def _today_key(prefix: str) -> str:
     return f"{prefix}:{now.strftime('%Y-%m-%d')}"
 
 
-def _load_graph_schema(path: str) -> dict:
+def _load_graph_schema(path: str) -> Dict[str, Any]:
     if not os.path.exists(path):
         raise RuntimeError(f"[FATAL][TokenCap] graph_schema.json not found at: {path}")
     try:
@@ -114,7 +121,7 @@ def _load_graph_schema(path: str) -> dict:
     return schema
 
 
-def _looks_like_graph_call(data: dict) -> bool:
+def _looks_like_graph_call(data: Dict[str, Any]) -> bool:
     try:
         rf = data.get("response_format") or {}
         if isinstance(rf, dict) and rf.get("type") == "json_schema":
@@ -156,7 +163,7 @@ class TokenCap(CustomLogger):
         self,
         user_api_key_dict,
         cache,
-        data: dict,
+        data: Dict[str, Any],
         call_type: Literal[
             "completion",
             "text_completion",

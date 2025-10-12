@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import time
 from typing import Any, Dict, List, Optional
@@ -13,7 +14,7 @@ from pydantic import BaseModel, Field
 # 環境變數
 LITELLM_BASE = os.environ.get("LITELLM_BASE", "http://litellm:4000/v1").rstrip("/")
 LITELLM_KEY = os.environ.get("LITELLM_KEY", "sk-admin")
-RERANKER_URL = os.environ.get("RERANKER_URL", "http://reranker:80")
+RERANKER_URL = os.environ.get("RERANKER_URL", "http://reranker:8080")
 
 API_KEYS = {
     k.strip() for k in os.environ.get("API_GATEWAY_KEYS", "dev-key").split(",") if k.strip()
@@ -62,10 +63,15 @@ with open(GRAPH_SCHEMA_PATH, "rb") as _f:
 
 app = FastAPI(title="FreeRoute RAG Infra – API Gateway", version=APP_VERSION)
 
+# basic structured logging (can be overridden by uvicorn settings)
+logger = logging.getLogger("gateway")
+if not logger.handlers:
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
+
 
 def require_key(
     x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)
-):
+) -> bool:
     token = None
     if x_api_key:
         token = x_api_key.strip()
@@ -116,7 +122,7 @@ ENTRYPOINTS = {"rag-answer", "graph-extractor"}
 DEFAULTS = {"chat": "rag-answer", "graph": "graph-extractor"}
 
 
-def _normalize_model(model: Optional[str], kind="chat") -> str:
+def _normalize_model(model: Optional[str], kind: str = "chat") -> str:
     if not model:
         return DEFAULTS[kind]
     m = model.strip()
@@ -188,7 +194,7 @@ def _kvize(obj: Any) -> List[Dict[str, Any]]:
     return []
 
 
-def _dedup_merge_nodes(nodes):
+def _dedup_merge_nodes(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     by_id = {}
     for n in nodes:
         k = n["id"]
@@ -270,7 +276,7 @@ def _is_single_error_node(d: Dict[str, Any]) -> bool:
         return False
 
 
-def _prune_graph(data):
+def _prune_graph(data: Dict[str, Any]) -> Dict[str, Any]:
     for n in data.get("nodes", []):
         n["props"] = [
             p
@@ -293,12 +299,12 @@ def _prune_graph(data):
 
 
 @app.get("/health")
-def health():
+def health() -> Dict[str, Any]:
     return {"ok": True}
 
 
 @app.get("/whoami", dependencies=[Depends(require_key)])
-def whoami():
+def whoami() -> Dict[str, Any]:
     return {
         "app_version": APP_VERSION,
         "litellm_base": LITELLM_BASE,
@@ -317,12 +323,12 @@ def whoami():
 
 
 @app.get("/version")
-def version():
+def version() -> Dict[str, str]:
     return {"version": APP_VERSION}
 
 
 @app.post("/chat", dependencies=[Depends(require_key)])
-def chat(req: ChatReq, request: Request):
+def chat(req: ChatReq, request: Request) -> Dict[str, Any]:
     model = _normalize_model(req.model, kind="chat")
     messages = req.messages
     if not isinstance(messages, list) or not messages:
@@ -345,6 +351,7 @@ def chat(req: ChatReq, request: Request):
     try:
         resp = _retry_once_429(_call)
     except Exception as e:
+        logger.exception("/chat upstream error")
         raise HTTPException(status_code=502, detail=f"upstream_chat_error: {e}")
 
     out = resp.choices[0].message.content
@@ -356,17 +363,18 @@ def chat(req: ChatReq, request: Request):
 
 
 @app.post("/embed", dependencies=[Depends(require_key)])
-def embed(req: EmbedReq):
+def embed(req: EmbedReq) -> Dict[str, Any]:
     try:
         r = client.embeddings.create(model="local-embed", input=req.texts)
         vecs = [d.embedding for d in r.data]
         return {"ok": True, "vectors": vecs, "dim": (len(vecs[0]) if vecs else 0)}
     except Exception as e:
+        logger.exception("/embed upstream error")
         raise HTTPException(status_code=502, detail=f"embed_error: {e}")
 
 
 @app.post("/rerank", dependencies=[Depends(require_key)])
-def rerank(req: RerankReq):
+def rerank(req: RerankReq) -> Dict[str, Any]:
     try:
         r = requests.post(
             f"{RERANKER_URL}/rerank",
@@ -376,11 +384,12 @@ def rerank(req: RerankReq):
         r.raise_for_status()
         return {"ok": True, "results": r.json().get("results", [])}
     except Exception as e:
+        logger.exception("/rerank upstream error")
         raise HTTPException(status_code=502, detail=f"rerank_error: {e}")
 
 
 @app.post("/graph/probe", dependencies=[Depends(require_key)])
-def graph_probe(req: GraphProbeReq, request: Request):
+def graph_probe(req: GraphProbeReq, request: Request) -> Dict[str, Any]:
     messages = req.messages or [
         {"role": "system", "content": "你是資訊抽取引擎，只輸出 JSON（若無法則輸出簡短文字）。"},
         {"role": "user", "content": "Bob 於2022年加入 Acme 擔任工程師；Acme 總部位於台北。"},
@@ -438,6 +447,7 @@ def graph_probe(req: GraphProbeReq, request: Request):
         else:
             return {"ok": True, "mode": "text", "text": txt, "provider": provider}
     except Exception as e:
+        logger.exception("/graph/probe upstream error")
         raise HTTPException(
             status_code=502,
             detail={"error": "upstream_probe_error", "model": req.model, "message": str(e)},
@@ -445,7 +455,7 @@ def graph_probe(req: GraphProbeReq, request: Request):
 
 
 @app.post("/graph/extract", dependencies=[Depends(require_key)])
-def graph_extract(req: GraphReq):
+def graph_extract(req: GraphReq) -> Dict[str, Any]:
     min_nodes = int(req.min_nodes) if req.min_nodes is not None else GRAPH_MIN_NODES
     min_edges = int(req.min_edges) if req.min_edges is not None else GRAPH_MIN_EDGES
     allow_empty = bool(req.allow_empty) if req.allow_empty is not None else GRAPH_ALLOW_EMPTY
@@ -517,19 +527,27 @@ def graph_extract(req: GraphReq):
     attempts: List[Dict[str, Any]] = []
 
     for provider in provider_chain:
-        print(f"[GraphExtract] trying provider: {provider}")
+        logger.info("[GraphExtract] trying provider: %s", provider)
         for attempt in range(1, max_attempts + 1):
             mode = "strict" if attempt == 1 else "nudge"
             try:
                 result = _retry_once_429(_call_once, provider, mode)
                 data = result["data"]
-                print(
-                    f"[GraphExtract] attempt {attempt} with {provider} ({mode}) produced {len(data.get('nodes', []))} nodes and {len(data.get('edges', []))} edges"
+                logger.info(
+                    "[GraphExtract] attempt %s with %s (%s) produced %s nodes and %s edges",
+                    attempt,
+                    provider,
+                    mode,
+                    len(data.get("nodes", [])),
+                    len(data.get("edges", [])),
                 )
 
                 if _is_single_error_node(data):
-                    print(
-                        f"[GraphExtract] attempt {attempt} with {provider} ({mode}) produced a single error node"
+                    logger.warning(
+                        "[GraphExtract] attempt %s with %s (%s) produced a single error node",
+                        attempt,
+                        provider,
+                        mode,
                     )
                     attempts.append(
                         {
@@ -562,7 +580,13 @@ def graph_extract(req: GraphReq):
                 )
 
             except Exception as e:
-                print(f"[GraphExtract] attempt {attempt} with {provider} ({mode}) failed: {e}")
+                logger.warning(
+                    "[GraphExtract] attempt %s with %s (%s) failed: %s",
+                    attempt,
+                    provider,
+                    mode,
+                    e,
+                )
                 if not req.repair_if_invalid:
                     attempts.append(
                         {
@@ -636,10 +660,12 @@ def graph_extract(req: GraphReq):
                             "error": f"{type(e2).__name__}: {e2}",
                         }
                     )
+        logger.info(
+            "[GraphExtract] provider %s exhausted all attempts, moving to next if any",
+            provider,
+        )
 
-        print(f"[GraphExtract] provider {provider} exhausted all attempts, moving to next if any")
-
-    print(f"[GraphExtract] all providers exhausted, total attempts: {len(attempts)}")
+    logger.error("[GraphExtract] all providers exhausted, total attempts: %s", len(attempts))
     raise HTTPException(
         status_code=422,
         detail={
