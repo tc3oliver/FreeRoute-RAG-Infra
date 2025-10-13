@@ -1,3 +1,4 @@
+# === 標準函式庫 ===
 import hashlib
 import json
 import logging
@@ -7,6 +8,7 @@ import uuid
 from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
+# === 第三方套件 ===
 import requests
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import PlainTextResponse
@@ -14,14 +16,16 @@ from jsonschema import Draft202012Validator, validate
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-# 環境變數
+# === 環境變數與全域參數 ===
 LITELLM_BASE = os.environ.get("LITELLM_BASE", "http://litellm:4000/v1").rstrip("/")
 LITELLM_KEY = os.environ.get("LITELLM_KEY", "sk-admin")
 RERANKER_URL = os.environ.get("RERANKER_URL", "http://reranker:8080")
 
 API_KEYS = {k.strip() for k in os.environ.get("API_GATEWAY_KEYS", "dev-key").split(",") if k.strip()}
+
 # 統一路徑：容器內掛載到 /app/schemas/graph_schema.json
 GRAPH_SCHEMA_PATH = os.environ.get("GRAPH_SCHEMA_PATH", "/app/schemas/graph_schema.json")
+
 
 # Graph 工作流程參數（可環境覆蓋）
 GRAPH_MIN_NODES = int(os.environ.get("GRAPH_MIN_NODES", "1"))
@@ -36,9 +40,12 @@ PROVIDER_CHAIN = ENV_PROVIDER_CHAIN if ENV_PROVIDER_CHAIN else DEFAULT_PROVIDER_
 
 APP_VERSION = os.environ.get("APP_VERSION", "v0.1.0")
 
+
+# === OpenAI 客戶端 ===
 client = OpenAI(base_url=LITELLM_BASE, api_key=LITELLM_KEY)
 
 
+## === 工具函式 ===
 def _load_graph_schema(path: str) -> Dict[str, Any]:
     if not os.path.exists(path):
         raise RuntimeError(f"[FATAL] graph_schema.json not found at: {path}")
@@ -60,14 +67,18 @@ GRAPH_JSON_SCHEMA = _load_graph_schema(GRAPH_SCHEMA_PATH)
 with open(GRAPH_SCHEMA_PATH, "rb") as _f:
     GRAPH_SCHEMA_HASH = hashlib.sha256(_f.read()).hexdigest()
 
+
+# === FastAPI 應用 ===
 app = FastAPI(title="FreeRoute RAG Infra – API Gateway", version=APP_VERSION)
 
-# basic structured logging (can be overridden by uvicorn settings)
+
+# basic structured logging (可被 uvicorn 設定覆蓋)
 logger = logging.getLogger("gateway")
 if not logger.handlers:
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
 
 
+# === Middleware ===
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     """Attach X-Request-ID to every request/response for tracing."""
@@ -92,12 +103,11 @@ async def add_request_id(request: Request, call_next):
 
 # Optional Prometheus metrics (soft dependency). If prometheus-client isn't
 # installed the gateway will still function; metrics will be disabled.
+
+# Prometheus metrics (可選)
 try:
     from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, Histogram, generate_latest
 
-    # Use a module-local CollectorRegistry to avoid conflicts when the module is
-    # reloaded during tests or in long-running interpreters. This prevents
-    # "Duplicated timeseries" ValueError on re-import.
     METRICS_ENABLED = True
     _METRICS_REG = CollectorRegistry()
     REQUEST_COUNTER = Counter(
@@ -121,14 +131,12 @@ async def prometheus_middleware(request: Request, call_next):
     """Middleware to record Prometheus metrics (if enabled)."""
     if not METRICS_ENABLED:
         return await call_next(request)
-
     path = request.url.path
     method = request.method
     try:
         with REQUEST_LATENCY.labels(method=method, endpoint=path).time():
             resp = await call_next(request)
     except Exception:
-        # increment counter for 500 on exception paths
         REQUEST_COUNTER.labels(method=method, endpoint=path, http_status="500").inc()
         raise
     status = str(resp.status_code)
@@ -136,13 +144,12 @@ async def prometheus_middleware(request: Request, call_next):
     return resp
 
 
-# per-request context stored in a ContextVar so logging filter can access it
+# === 請求上下文與日誌 ===
 request_ctx: ContextVar[Dict[str, Any]] = ContextVar("request_ctx", default={})
 
 
 class RequestContextFilter(logging.Filter):
     """Attach current request context fields to LogRecord.
-
     The filter adds: request_id, client_ip, duration_ms, and event (if present).
     """
 
@@ -155,7 +162,6 @@ class RequestContextFilter(logging.Filter):
             record.duration_ms = int((time.time() - start) * 1000)
         else:
             record.duration_ms = 0
-        # ensure an event field exists
         if not hasattr(record, "event"):
             record.event = getattr(record, "event", "-")
         return True
@@ -166,7 +172,6 @@ try:
     f = RequestContextFilter()
     logger.addFilter(f)
     for h in logger.handlers:
-        # prefer a compact structured formatter for gateway logs
         try:
             h.setFormatter(
                 logging.Formatter(
@@ -178,12 +183,9 @@ try:
 except Exception:
     pass
 
-    pass
-
 
 def log_event(msg: str, event: str, level: int = logging.INFO, **meta: Any) -> None:
     """Convenience helper to log with an `event` and optional structured metadata.
-
     Usage: log_event("starting extraction", "graph.extract.start", provider=provider)
     """
     extra = {"event": event}
@@ -202,6 +204,7 @@ def require_key(x_api_key: Optional[str] = Header(None), authorization: Optional
     return True
 
 
+# === 請求/回應資料模型 ===
 class ChatReq(BaseModel):
     messages: List[Dict[str, str]] = Field(..., description="OpenAI chat messages")
     model: Optional[str] = Field(None, description="建議留空或使用入口名")
@@ -496,6 +499,7 @@ def _prune_graph(data: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
+# === API 路由 ===
 @app.get("/health", response_model=HealthResp, tags=["meta"])
 def health() -> Dict[str, Any]:
     return {"ok": True}
