@@ -1,32 +1,35 @@
+# === 標準函式庫 ===
 import logging
 import os
 from typing import Any, Dict, List
 
-import numpy as np
+# === 第三方套件 ===
 import torch
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+# === FastAPI 應用與日誌 ===
 app = FastAPI(title="PyTorch Reranker (bge-reranker-v2-m3)", version="1.0")
 logger = logging.getLogger("reranker")
 if not logger.handlers:
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
 
+
+# === 環境變數與模型參數 ===
 MODEL_ID = os.environ.get("MODEL_ID", "BAAI/bge-reranker-v2-m3")
 DEVICE_ENV = os.environ.get("DEVICE", "auto")
 DTYPE_ENV = os.environ.get("DTYPE", "bfloat16").lower()
 TOKEN_MAXLEN = int(os.environ.get("TOKEN_MAXLEN", "512"))
+
 
 if DEVICE_ENV == "auto":
     _device_str = "cuda" if torch.cuda.is_available() else "cpu"
 else:
     _device_str = DEVICE_ENV
 
-# use torch.device for consistent .to() behaviour and device comparisons
 device = torch.device(_device_str)
-# Track model device globally for consistent moves
 MODEL_DEVICE = device
 
 dtype_map = {
@@ -39,6 +42,8 @@ dtype_map = {
 }
 dtype = dtype_map.get(DTYPE_ENV, torch.bfloat16 if device.type == "cuda" else torch.float32)
 
+
+# === 模型載入 ===
 try:
     logger.info("[Reranker] loading tokenizer/model model=%s device=%s dtype=%s", MODEL_ID, device, dtype)
     tok = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -47,7 +52,6 @@ try:
         .to(device)
         .eval()
     )
-    # capture the exact device the model is on (e.g., cuda:0)
     try:
         MODEL_DEVICE = next(model.parameters()).device
     except Exception:
@@ -70,12 +74,14 @@ except Exception as e:
     raise
 
 
+# === 請求/回應資料模型 ===
 class RerankReq(BaseModel):
     query: str = Field(..., description="search/query text")
     documents: List[str] = Field(..., description="candidate documents")
     top_n: int = Field(6, ge=1, description="top-N results to return")
 
 
+# === API 路由 ===
 @app.get("/health")
 def health() -> Dict[str, Any]:
     return {"ok": True, "device": str(device), "dtype": str(dtype), "model": MODEL_ID}

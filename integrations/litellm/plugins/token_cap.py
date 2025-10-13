@@ -9,6 +9,7 @@ graceful Redis degradation, and clearer typing/docstrings. Behavioral surface is
 kept compatible with the original implementation.
 """
 
+# === 標準函式庫 ===
 import asyncio
 import datetime
 import json
@@ -16,43 +17,48 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any, Dict, Literal, Optional
 
+# === 第三方套件 ===
 import redis.asyncio as redis
 
+# === 動態/型別檢查 import，允許單元測試 fallback ===
 if TYPE_CHECKING:
     from litellm.integrations.custom_logger import CustomLogger as _CustomLogger
-else:  # runtime import with fallback
+else:
     try:
         from litellm.integrations.custom_logger import CustomLogger as _CustomLogger
     except Exception:  # pragma: no cover
-
-        class _CustomLogger:  # fallback to allow plugin import in unit tests
+        # fallback class for unit test import
+        class _CustomLogger:
             def __init__(self, *args, **kwargs): ...
 
 
+# === 日誌設定 ===
 logger = logging.getLogger("tokencap")
 if not logger.handlers:
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
 
 
+# === 環境變數 ===
 OPENAI_TPD_LIMIT = int(os.getenv("OPENAI_TPD_LIMIT", "10000000"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 TZ_OFFSET_HOURS = int(os.getenv("TZ_OFFSET_HOURS", "8"))
 GRAPH_SCHEMA_PATH = os.getenv("GRAPH_SCHEMA_PATH", "/app/schemas/graph_schema.json")
 
+
 OPENAI_ENTRYPOINTS_EXACT = {"rag-answer", "graph-extractor"}
 OPENAI_ENTRYPOINTS_PREFIX = ("graph-extractor",)
-
 OPENAI_REROUTE_REAL = os.getenv("OPENAI_REROUTE_REAL", "true").lower() == "true"
 
 
+# === reroute 設定 ===
 REROUTE_MAP = {
     "rag-answer": "rag-answer-gemini",
     "graph-extractor": "graph-extractor-gemini",
     "graph-extractor-o1mini": "graph-extractor-gemini",
 }
-
 DEFAULT_GRAPH_REROUTE = "graph-extractor-gemini"
 DEFAULT_RAG_REROUTE = "rag-answer-gemini"
+
 
 _OPENAI_NAME_PREFIXES = (
     "openai/",
@@ -71,6 +77,7 @@ _OPENAI_NAME_EXACT = {
 }
 
 
+## === 工具函式 ===
 def is_openai_model_name(name: str) -> bool:
     if not name:
         return False
@@ -171,9 +178,11 @@ def _looks_like_graph_call(data: Dict[str, Any]) -> bool:
     return False
 
 
+# === 載入 Graph Schema ===
 GRAPH_JSON_SCHEMA = _load_graph_schema(GRAPH_SCHEMA_PATH)
 
 
+## === 主流程 TokenCap 類別 ===
 class TokenCap(_CustomLogger):
     def __init__(self):
         self._r: Optional[redis.Redis] = None
@@ -379,4 +388,5 @@ class TokenCap(_CustomLogger):
         return
 
 
+# === Plugin 實例 ===
 proxy_handler_instance = TokenCap()
