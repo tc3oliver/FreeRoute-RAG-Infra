@@ -7,7 +7,7 @@ openai>=1.59.6,<2.0.0
 httpx==0.28.1
 typing-extensions>=4.11.0,<5.0.0
 requests==2.32.5
-pydantic==2.9.2
+pydantic==2.12.2
 jsonschema==4.25.1
 
 # 新增：向量庫與圖庫客戶端
