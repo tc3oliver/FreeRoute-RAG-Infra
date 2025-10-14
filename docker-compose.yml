@@ -5,6 +5,45 @@ x-common-env: &common-env
 
 services:
   # ─────────────────────────────────────────────────────────
+  # 向量資料庫：Qdrant（本地、免費）
+  # ─────────────────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:latest
+    platform: ${PLATFORM:-linux/amd64}
+    environment:
+      <<: *common-env
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports: ["6333:6333"]
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────
+  # 圖資料庫：Neo4j（社群版）
+  # ─────────────────────────────────────────────────────────
+  neo4j:
+    image: neo4j:5-community
+    platform: ${PLATFORM:-linux/amd64}
+    environment:
+      <<: *common-env
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-neo4j123}
+      NEO4J_server_memory_pagecache_size: 1G
+      NEO4J_server_memory_heap_initial__size: 1G
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4JLABS_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/import
+      - neo4j_plugins:/plugins
+    ports: ["7474:7474", "7687:7687"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  # ─────────────────────────────────────────────────────────
   # Redis：LiteLLM 用量/限速快取
   # ─────────────────────────────────────────────────────────
   redis:
@@ -164,6 +203,28 @@ services:
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────
+  # 文件匯入服務：自動切分、索引、圖譜抽取
+  # ─────────────────────────────────────────────────────────
+  ingestor:
+    build:
+      context: .
+      dockerfile: containers/ingestor/Dockerfile
+    platform: ${PLATFORM:-linux/amd64}
+    depends_on:
+      apigw:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      GATEWAY_BASE: http://apigw:8000
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:-dev-key}
+      CHUNK_SIZE: ${CHUNK_SIZE:-1000}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-200}
+    volumes:
+      - ./data:/data:ro  # 掛載本地 data 目錄供匯入
+    ports: ["9900:8000"]
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────
   # API Gateway：你的系統對外只需打這層
   # ─────────────────────────────────────────────────────────
   apigw:
@@ -178,6 +239,10 @@ services:
         condition: service_healthy
       reranker:
         condition: service_healthy
+      qdrant:
+        condition: service_started
+      neo4j:
+        condition: service_healthy
     environment:
       <<: *common-env
       APP_VERSION: ${APP_VERSION:-v0.1.0}
@@ -186,6 +251,10 @@ services:
       OLLAMA_BASE: http://ollama:11434
       RERANKER_URL: http://reranker:8080
       GRAPH_SCHEMA_PATH: /app/schemas/graph_schema.json
+      QDRANT_URL: http://qdrant:6333
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-neo4j123}
     ports: ["9800:8000"]
     volumes:
       - ./schemas/graph_schema.json:/app/schemas/graph_schema.json:ro
@@ -201,3 +270,8 @@ volumes:
     name: litellm_postgres_data
   ollama_models:
   reranker_models:
+  qdrant_data:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_import:
+  neo4j_plugins:

@@ -3,379 +3,461 @@
 <div align="right">
   <sup>語言：</sup>
   <a href="README.md">English</a> |
-  <a href="README.zh-TW.md">繁體中文</a>
-
+  <a href="README.zh-TW.md"><b>繁體中文</b></a>
 </div>
 
-Zero-Cost RAG/GraphRAG Infrastructure — LangChain Compatible
+**零成本 GraphRAG 基礎設施 — 生產就緒、可與 LangChain 相容**
+
+端到端 **文件 → 向量索引 → 知識圖譜 → 混合檢索**，支援自動攝取、圖譜抽取，以及依成本/配額自動切換多供應商路由。
 
 <!-- 徽章 -->
+
 [![CI](https://github.com/tc3oliver/FreeRoute-RAG-Infra/actions/workflows/ci.yml/badge.svg)](https://github.com/tc3oliver/FreeRoute-RAG-Infra/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Docker Compose](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)
+![Docker Compose](https://img.shields.io/badge/docker-compose-2496ED?logo=docker\&logoColor=white)
 
-## 專案簡介
+---
 
-FreeRoute RAG Infra 是一套可本機部署的 RAG/GraphRAG 基礎設施，目標是讓開發者在無付費門檻下，充分利用免費 API 與本地元件進行開發與測試（Free-first）。
+## 概述
 
-重點能力：
+FreeRoute RAG Infra 可在本機部署，協助你以**極低成本（近零成本）**打造 RAG/GraphRAG 系統。優先使用免費或低成本供應商；當觸發配額或錯誤時自動回退；同時提供本地嵌入與重排序元件。
 
-- Free-first 路由：優先走免費或低成本供應商；當 OpenAI 達每日 Token 上限（TPD）或出錯時，自動改道至 Gemini / Groq / OpenRouter。本地 Embeddings 走 Ollama。
-- 標準介面：LiteLLM 提供 OpenAI 相容端點（供 LangChain/SDK）；API Gateway 提供 /chat /embed /rerank /graph/extract。
-- 本地能力：Ollama（bge-m3）向量嵌入、bge-reranker-v2-m3 重排序，可選 GPU。
-- 可觀測與治理：TokenCap（每日 Token 限額與計數）、Redis、Dashboard UI。
-- GraphRAG：抽取與 Schema 驗證/修復，結構可映射 Neo4j/GraphDB。
+**重點特色**
 
-適用場景：個人/團隊 Dev/Test、私有 LLM API Proxy、課程/工作坊、RAG/GraphRAG PoC。
+* 一行指令快速啟動（Docker Compose）
+* OpenAI 相容 Proxy（LiteLLM）供 LangChain / SDK 直接使用
+* 混合檢索：向量 + 知識圖譜（可選 rerank）
+* TokenCap：每日 OpenAI token 上限，依使用情境智慧回退
+* 本地推論：Ollama bge-m3（embeddings）、BAAI bge-reranker-v2-m3（rerank）
+* 可觀測性：健康檢查、選配 Prometheus metrics、可視化儀表板
 
-## 目錄
+---
 
-- [專案簡介](#專案簡介)
-## 快速開始
+## 快速開始（本機）
 
-1) 建立 `.env`（示例）：
+1. 建立 `.env`：
 
 ```bash
-# .env（示例）
+# .env（範例）
 OPENAI_API_KEY=...
 GOOGLE_API_KEY=...
 OPENROUTER_API_KEY=...
 GROQ_API_KEY=...
-# 可選：API_GATEWAY_KEYS=dev-key,another-key
+# 可選：
+API_GATEWAY_KEYS=dev-key,another-key
+NEO4J_PASSWORD=neo4j123
+POSTGRES_PASSWORD=postgres123
 ```
 
-2) 使用 Docker Compose 啟動（建議）：
+2. 啟動全部服務：
 
 ```bash
 docker compose up -d --build
 ```
 
-3) 健康檢查：
+3. 健康檢查：
 
 ```bash
-curl -s http://localhost:9400/health || curl -s http://localhost:9400/health/readiness | jq
+# LiteLLM proxy
+curl -s http://localhost:9400/health | jq || \
+curl -s http://localhost:9400/health/readiness | jq
+
+# Gateway / Ingestor
 curl -s http://localhost:9800/health | jq
+curl -s http://localhost:9900/health | jq
 ```
 
-4) Dashboard（LiteLLM UI）：
+4. 儀表板（LiteLLM UI）
 
-- URL: http://localhost:9400/ui
-- 預設帳密：admin / admin123（請儘速修改）
+* URL：[http://localhost:9400/ui](http://localhost:9400/ui)
+* 預設帳密：`admin` / `admin123` → **請儘速修改**
 
-首次啟動注意事項：
+**備註**
 
-- Ollama 會自動拉取 `bge-m3` 模型；Reranker 在首次啟動時會下載 `BAAI/bge-reranker-v2-m3`，可能需數分鐘。
-- Docker Compose 會建立持久卷，如 `ollama_models` 與 `reranker_models`。
+* Ollama 會自動拉取 **`bge-m3`**。
+* Reranker 首次啟動會下載 **`BAAI/bge-reranker-v2-m3`**（需數分鐘）。
+* Compose 以 `ollama_models`、`reranker_models` 等 volume 持久化模型。
 
-開發者快速啟動（使用 repo 的 .venv）：
+---
+
+## 開發者快速開始
 
 ```bash
-# 建立虛擬環境（若尚未建立）
+# 建立並啟用虛擬環境
 python -m venv .venv
 source .venv/bin/activate
+
 # 安裝執行與開發依賴
 pip install -r services/gateway/requirements.txt
 pip install -r requirements-dev.txt
 ```
 
-本機啟動 Gateway（開發用）：
+本地啟動 **Gateway**：
 
 ```bash
-# 於專案根目錄執行
-PYTHONPATH=$(pwd) .venv/bin/uvicorn services.gateway.app:app --reload --port 9800
+uvicorn services.gateway.app:app --host 0.0.0.0 --port 9800 --reload
 ```
-## 對象
 
-- 想以最低成本驗證 RAG/GraphRAG 的個人與團隊
-- 需要私有化、可觀測、LangChain 相容 API 的工程場景
+本地啟動 **Reranker**（可選）：
+
+```bash
+uvicorn services.reranker.server:app --host 0.0.0.0 --port 9080 --reload
+```
+
+---
 
 ## 架構
 
 ```mermaid
-flowchart TB
-  subgraph CLIENT["使用者應用層"]
-    LC["LangChain / SDK"]
-    FE["Web / API Client"]
+flowchart LR
+  classDef grp fill:#ffffff,stroke:#2b6cb0,stroke-width:1px,color:#1a202c;
+  classDef box fill:#f8fafc,stroke:#64748b,stroke-width:1px,color:#0f172a;
+  classDef entry fill:#ecfeff,stroke:#0891b2,stroke-width:1px,color:#0e7490;
+  classDef core fill:#f1f5f9,stroke:#334155,stroke-width:1px,color:#0f172a;
+  classDef store fill:#fefce8,stroke:#ca8a04,stroke-width:1px,color:#713f12;
+  classDef provider fill:#fdf2f8,stroke:#db2777,stroke-width:1px,color:#9d174d;
+  classDef local fill:#eef2ff,stroke:#4f46e5,stroke-width:1px,color:#312e81;
+  classDef edgeNote stroke-dasharray: 4 3;
+
+  subgraph CLIENT["① 用戶端 / SDK"]
+    U["👤 Web Client<br/>— REST / X-API-Key —"]:::entry
+    LC["🧰 LangChain / SDK<br/>(OpenAI 相容)"]:::entry
   end
+  class CLIENT grp
 
-  subgraph GATEWAY["API Gateway (9800)"]
-    G1["/chat"]
-    G2["/graph/extract"]
-    G3["/embed"]
-    G4["/rerank"]
+  subgraph APIGW["② API Gateway (9800)<br/>— 認證 / 路由 / 協作 —"]
+    GW_CHAT["/chat"]:::box
+    GW_RETRIEVE["/retrieve  /search"]:::box
+    GW_INDEX["/index/chunks"]:::box
+    GW_GRAPH["/graph/*"]:::box
+    GW_EMBED["/embed"]:::box
+    GW_RERANK["/rerank"]:::box
   end
+  class APIGW grp
 
-  subgraph CORE["FreeRoute RAG Infra Core"]
-  subgraph LITELLM["LiteLLM Proxy (9400)"]
-      TOK["TokenCap"]
-      LDB[("Dashboard UI")]
-    end
+  subgraph ING["③ 攝取服務 (9900)<br/>— 目錄掃描 / 分段 —"]
+    ING_RUN["ingest/directory<br/>CLI / API"]:::box
   end
+  class ING grp
 
-  subgraph LOCAL["本地服務"]
-    OLLAMA[("Ollama<br/>bge-m3")]
-    RERANK["bge-reranker-v2-m3"]
-    REDIS["Redis"]
-    PG["Postgres"]
+  subgraph LLMCORE["④ LiteLLM Proxy (9400)<br/>— 模型路由 / TokenCap / UI —"]
+    LC_TC["🧱 TokenCap / 路由策略"]:::core
+    LC_UI["📊 Dashboard UI"]:::core
+    LLM_BUS["🔀 OpenAI 相容路由"]:::core
+    REDIS["🧮 Redis 6379<br/>快取 / Token 計數器"]:::store
   end
+  class LLMCORE grp
 
-  subgraph PROVIDERS["雲端模型供應商"]
-    OAI["OpenAI"]
-    GGM["Gemini"]
-    OPR["OpenRouter"]
-    GRQ["Groq"]
+  subgraph LOCAL["⑤ 本地推論"]
+    OLLAMA["🧩 Ollama (bge-m3)<br/>Embeddings"]:::local
+    RERANK["↕️ bge-reranker-v2-m3<br/>Reranker"]:::local
   end
+  class LOCAL grp
 
-  LC --|OpenAI 相容 API|--> LITELLM
-  FE --|REST / X-API-Key|--> GATEWAY
+  subgraph STORAGE["⑥ 儲存 / 資料庫"]
+    QDRANT["🗂 Qdrant 6333<br/>向量索引"]:::store
+    NEO4J["🕸 Neo4j 7474/7687<br/>知識圖譜"]:::store
+    PG["📇 Postgres 5432<br/>中繼資料 / 日誌"]:::store
+  end
+  class STORAGE grp
 
-  GATEWAY --> LITELLM
-  LITELLM --> OLLAMA
-  GATEWAY --> OLLAMA
-  GATEWAY --> RERANK
+  subgraph PROVIDERS["⑦ 雲端模型供應商"]
+    OAI["OpenAI"]:::provider
+    GGM["Google Gemini"]:::provider
+    OPR["OpenRouter"]:::provider
+    GRQ["Groq"]:::provider
+  end
+  class PROVIDERS grp
 
-  LITELLM --> REDIS
-  LITELLM --> LDB
+  U -->|"REST（X-API-Key）"| APIGW
+  LC -->|"OpenAI 相容 API"| LLMCORE
 
-  LITELLM --> OAI
-  LITELLM --> GGM
-  LITELLM --> OPR
-  LITELLM --> GRQ
+  ING_RUN -->|"呼叫 /index/chunks"| GW_INDEX
+  ING_RUN -.->|"批量"| QDRANT:::edgeNote
+
+  GW_CHAT -->|"對話 / 工具"| LLM_BUS
+  GW_RETRIEVE -->|"檢索"| QDRANT
+  GW_RETRIEVE -->|"圖查詢"| NEO4J
+  GW_INDEX -->|"分段 → 嵌入"| GW_EMBED
+  GW_EMBED -->|"本地 embeddings"| OLLAMA
+  GW_INDEX -->|"寫入向量/中繼資料"| QDRANT
+  GW_INDEX -->|"寫入 metadata"| PG
+  GW_RERANK -->|"重排序請求"| RERANK
+  GW_GRAPH -->|"upsert / query"| NEO4J
+  APIGW -->|"操作記錄"| PG
+
+  LLM_BUS --> OLLAMA
+  LLM_BUS --> LC_TC
+  LLM_BUS --> LC_UI
+  LLM_BUS --> OAI
+  LLM_BUS --> GGM
+  LLM_BUS --> OPR
+  LLM_BUS --> GRQ
+  LLMCORE --> REDIS
+
+  QDRANT -.->|"檢索結果"| RERANK:::edgeNote
+  RERANK -.->|"Top-K 排序"| LLM_BUS:::edgeNote
+  LLM_BUS -.->|"最終回答"| APIGW:::edgeNote
+  APIGW -.->|"回傳"| U:::edgeNote
 ```
 
-備註：LangChain 建議直連 LiteLLM（9400）。前端或應用層流程走 API Gateway（9800）。
+> 提示：**LangChain 建議直連 LiteLLM**（埠 **9400**）；終端應用流程走 **API Gateway**（埠 **9800**）。
 
-## 需求
+---
 
-- Docker 24+（Compose v2）
-- 可選 GPU：NVIDIA 驅動與 Container Toolkit（Linux 建議 CUDA 12.x）
+## 功能特色
 
-## 快速開始
+* **OpenAI 相容 API**（LiteLLM proxy + 儀表板）
+* **API Gateway**：`/chat`、`/embed`、`/rerank`、`/graph/*`
+* **本地嵌入**：Ollama **bge-m3**
+* **本地重排序**：**BAAI/bge-reranker-v2-m3**（可選 GPU）
+* **TokenCap**：每日 OpenAI token 上限 + 用量感知回退
+* **可觀測性**：健康端點，選配 Prometheus `/metrics`
 
-1) 建立 .env
+## 系統需求
+
+* Docker 24+（Compose v2）
+* 可選 GPU：NVIDIA 驅動 + Container Toolkit（建議 Linux / CUDA 12.x）
+
+---
+
+## ✨ GraphRAG 能力
+
+**從文件到回答的完整流程**
+
+* 📄 **文件攝取**：自動掃描資料夾、分塊與索引（Markdown/HTML/TXT）
+* 🔍 **向量搜尋**：透過 Ollama（bge-m3）產生本地 embeddings
+* 🕸 **知識圖譜**：自動抽取實體/關係，儲存至 Neo4j
+* 🔀 **混合檢索**：向量 + 圖譜（可再加 BM25）
+* 🤖 **查詢規劃**：多供應商路由與具引用的回答
+* 📈 **可觀測性**：metrics、tracing、限流、健康檢查
+
+**基礎設施元件**
+
+* 🚀 **API Gateway**（9800）：統一端點、認證與協作
+* 🧠 **LiteLLM Proxy**（9400）：多供應商路由、TokenCap、回退鏈
+* 📚 **攝取服務**（9900）：批量處理與圖譜抽取
+* 🗄️ **儲存層**：Qdrant（向量）+ Neo4j（圖）+ Redis（計數/快取）+ Postgres（中繼資料）
+
+---
+
+## 端到端使用（CLI & cURL）
+
+### 步驟 1 — 攝取文件
 
 ```bash
-# .env（示例）
-OPENAI_API_KEY=...
-GOOGLE_API_KEY=...
-OPENROUTER_API_KEY=...
-GROQ_API_KEY=...
-# 可選：API_GATEWAY_KEYS=dev-key,another-key
+mkdir -p data
+echo "Alice Johnson 是台北 Acme Corporation 的資深軟體工程師，專長 Python、GraphRAG 與 AI 系統。" > data/alice.md
+
+curl -X POST http://localhost:9900/ingest/directory \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "/data",
+    "collection": "knowledge_base",
+    "file_patterns": ["*.md", "*.txt"],
+    "chunk_size": 800,
+    "extract_graph": true,
+    "force_reprocess": true
+  }' | jq
 ```
 
-2) 啟動
+### 步驟 2 — 混合檢索
 
 ```bash
-docker compose up -d --build
+# 向量搜尋
+curl -X POST http://localhost:9800/search \
+  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -d '{"query":"Python 工程師技能","top_k":3,"collection":"knowledge_base"}' | jq
+
+# GraphRAG（向量 + 子圖）
+curl -X POST http://localhost:9800/retrieve \
+  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -d '{"query":"誰在 Acme Corporation 工作？他們擅長什麼？","top_k":5,"include_subgraph":true,"max_hops":2}' | jq
 ```
 
-3) 健康檢查
+### 步驟 3 — 圖譜查詢
 
 ```bash
-curl -s http://localhost:9400/health || curl -s http://localhost:9400/health/readiness | jq
-curl -s http://localhost:9800/health | jq
+# Cypher（唯讀）
+curl -X POST http://localhost:9800/graph/query \
+  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -d '{"query":"MATCH (p:Person)-[r]-(c:Company) RETURN p.id, type(r), c.id LIMIT 10"}' | jq
+
+# 手動 upsert
+curl -X POST http://localhost:9800/graph/upsert \
+  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "nodes": [{"id":"Bob","type":"Person","props":[{"key":"role","value":"Manager"}]}],
+      "edges": [{"src":"Bob","dst":"Acme Corporation","type":"MANAGES","props":[]}]
+    }
+  }' | jq
 ```
 
-4) Dashboard
+### 步驟 4 — Ingestor CLI（替代方案）
 
--- URL: http://localhost:9400/ui
-- 預設帳密：admin / admin123（請儘速修改）
+```bash
+cd services/ingestor
+pip install -r requirements.txt
 
-首次啟動注意事項：
+python cli.py ../../data \
+  --collection mydata \
+  --chunk-size 1000 \
+  --ingestor-url http://localhost:9900
+```
 
-- Ollama 會自動拉取 bge-m3 模型；Reranker 會下載 BAAI/bge-reranker-v2-m3，首次啟動需數分鐘，之後會快很多。
-- 對應緩存卷：`ollama_models`、`reranker_models`。
+---
 
-## 設定與環境變數
+## 完整 API 參考
 
-建議放在 .env，勿提交版本控制。
+**最新定義**（端點、請求/回應結構、可用模型）請見：
 
-| 變數 | 範例 | 說明 |
-| --- | --- | --- |
-| LITELLM_MASTER_KEY | sk-admin | LiteLLM 統一 API 金鑰（供 LangChain/SDK） |
-| OPENAI_API_KEY | sk-... | OpenAI 金鑰（受每日 Token 限制） |
-| GOOGLE_API_KEY | AIza... | Gemini 金鑰 |
-| OPENROUTER_API_KEY | sk-or-... | OpenRouter 金鑰 |
-| GROQ_API_KEY | gsk_... | Groq 金鑰 |
-| OPENAI_TPD_LIMIT | 10000000 | 每日 OpenAI Token 上限（例 10M） |
-| OPENAI_REROUTE_REAL | true | 直接打真實 OpenAI 型號且超量時也會改道 |
-| GRAPH_SCHEMA_PATH | /app/schemas/graph_schema.json | Graph Schema 路徑（TokenCap/Gateway 共用） |
-| TZ | Asia/Taipei | 時區 |
-| TZ_OFFSET_HOURS | 8 | Redis 計數時區偏移 |
-| API_GATEWAY_KEYS | dev-key,another-key | Gateway 允許的 X-API-Key 清單 |
+* `docs/zh/api_usage.md`（繁體中文）
+* `docs/en/api_usage.md`（英文）
 
-API Gateway 補充環境變數：
+> 如發現文件與實際行為不同，請直接比對你目前分支與 `main`，或呼叫執行中服務的 `/health`、`/whoami`。
 
-- LITELLM_BASE（預設 http://litellm:4000/v1）：Gateway 代理至 LiteLLM 的 Base URL
-- LITELLM_KEY（預設 sk-admin）：Gateway 代理用的管理金鑰
-- RERANKER_URL（預設 http://reranker:8080；若未設，程式預設 80）：重排服務 URL
-- GRAPH_SCHEMA_PATH（預設 `/app/schemas/graph_schema.json`）：Gateway 與 TokenCap 共用（由 `./schemas/graph_schema.json` 掛載）
-- GRAPH_MIN_NODES / GRAPH_MIN_EDGES（預設 1 / 1）：/graph/extract 最小門檻
-- GRAPH_ALLOW_EMPTY（預設 false）：是否允許空結果通過
-- GRAPH_MAX_ATTEMPTS（預設 2）：每個 provider 嘗試次數（strict → nudge）
-- GRAPH_PROVIDER_CHAIN（預設 `graph-extractor,graph-extractor-o1mini,graph-extractor-gemini`）：provider 嘗試順序
+---
 
-費用保護：
+## 設定（.env）
 
-- `litellm.config.yaml` 已設定 `general_settings.max_budget_per_day: 0.0`，避免產生費用。
-- TokenCap 以 `OPENAI_TPD_LIMIT` 控制每日 OpenAI Token；compose 預設 9M（預留 1M 系統空間）。
+> 機密請放 `.env`，**不要**提交到版本庫。
 
-## 服務與埠號
+| 變數                    | 範例                               | 說明                                |
+| --------------------- | -------------------------------- | --------------------------------- |
+| `LITELLM_MASTER_KEY`  | `sk-admin`                       | 提供給 LangChain/SDK 的 LiteLLM 金鑰    |
+| `LITELLM_KEY`         | `sk-admin`                       | Gateway 呼叫 LiteLLM 的內部金鑰          |
+| `OPENAI_API_KEY`      | `sk-...`                         | OpenAI API 金鑰（受每日 token 上限）       |
+| `GOOGLE_API_KEY`      | `AIza...`                        | Google Gemini API 金鑰              |
+| `OPENROUTER_API_KEY`  | `sk-or-...`                      | OpenRouter API 金鑰                 |
+| `GROQ_API_KEY`        | `gsk_...`                        | Groq API 金鑰                       |
+| `OPENAI_TPD_LIMIT`    | `10000000`                       | 每日 OpenAI token 上限（例：10M）         |
+| `OPENAI_REROUTE_REAL` | `true`                           | 即便直接呼叫 OpenAI 也允許回退               |
+| `GRAPH_SCHEMA_PATH`   | `/app/schemas/graph_schema.json` | 圖譜 schema 路徑（TokenCap/Gateway 共用） |
+| `TZ`                  | `Asia/Taipei`                    | 時區                                |
+| `TZ_OFFSET_HOURS`     | `8`                              | Redis 每日計數器的時區偏移                  |
+| `API_GATEWAY_KEYS`    | `dev-key,another-key`            | Gateway 允許的 X-API-Key 清單          |
+| `NEO4J_PASSWORD`      | `neo4j123`                       | Neo4j 密碼                          |
+| `POSTGRES_PASSWORD`   | `postgres123`                    | Postgres 密碼                       |
+| `CHUNK_SIZE`          | `1000`                           | 預設文字分塊大小                          |
+| `CHUNK_OVERLAP`       | `200`                            | 分塊重疊字數                            |
 
-| 服務 | 埠 | 說明 |
-| --- | ---: | --- |
-| LiteLLM Proxy | 9400 | OpenAI 相容 API（給 LangChain/SDK） |
-| Dashboard UI | 9400 | http://localhost:9400/ui |
-| API Gateway | 9800 | /chat /embed /rerank /graph/extract |
-| Reranker | 9080 | POST /rerank（bge-reranker-v2-m3） |
-| Ollama | 9143 | bge-m3 embeddings |
-| Redis | 6379 | Token 計數/快取 |
-| Postgres | 5432 | 內部用途，預設不對外 |
+**GraphRAG 相關**
 
-## 免費額度與來源
+* `QDRANT_URL`（預設 `http://qdrant:6333`）— 向量資料庫
+* `NEO4J_URI`（預設 `bolt://neo4j:7687`）— 圖資料庫
+* `GATEWAY_BASE`（預設 `http://apigw:8000`）— Ingestor → Gateway
+* `GATEWAY_API_KEY`（預設 `dev-key`）— Ingestor 呼叫 Gateway 的金鑰
+* `GRAPH_MIN_NODES` / `GRAPH_MIN_EDGES`（預設 `1/1`）
+* `GRAPH_PROVIDER_CHAIN` — 圖譜抽取的供應商回退順序
 
-供應商的免費政策與配額會變動，下列資訊僅作為導引，請以官方頁面為準。
+**成本保護**
 
-- OpenAI（API）
-  - 現況：無「分享資料換每日免費 API token」的官方方案。API 預設不使用你的資料訓練（可選擇是否提供資料以改善服務）。
-  - 免費額度多來自新戶促銷或特定方案，是否提供視時點與地區而定。
-  - 參考：
-    - https://platform.openai.com/docs/billing/overview
-    - https://platform.openai.com/docs/guides/rate-limits/usage-tiers
+* `litellm.config.yaml` 中 `general_settings.max_budget_per_day: 0.0` 可避免意外支出
+* TokenCap 依 `OPENAI_TPD_LIMIT` 控制日用量；Compose 預設較高，預留系統使用空間
 
-- Google Gemini
-  - 在 AI Studio/Developers 提供免費或試用額度，不同模型與區域有差異。
-  - 參考：
-    - https://ai.google.dev/pricing
-
-- Groq
-  - 提供可免費使用的推理 API（如 Llama/Mixtral 變體），有速率與配額限制。
-  - 參考：
-    - https://groq.com/pricing
-
-- OpenRouter
-  - 聚合多家模型，部分標示為 free 的型號可免費使用，通常有佇列與速率限制。
-  - 參考：
-    - https://openrouter.ai/pricing
-    - https://openrouter.ai/models?tag=free
-
-- Ollama（本地）
-  - 本地推理，不需雲端費用；性能取決於硬體。
-  - 參考：
-    - https://ollama.com/
-
-備註：本專案預設優先走免費或低成本供應商。達到 OpenAI 每日 Token 上限（TPD）或發生錯誤時，會自動改道至 Gemini/Groq/OpenRouter；本地 Embeddings 走 Ollama。
+---
 
 ## 模型入口與路由
 
-已在 `litellm.config.yaml` 定義入口名，常用如下。
+**別名（摘要）**
 
-Chat / 推理：
+**聊天 / 推理**
 
-| 入口名 | 後端 | 說明 |
-| --- | --- | --- |
-| rag-answer | OpenAI gpt-5-mini | 預設；達頂改道 |
-| rag-answer-gemini | Gemini 2.5 Flash | 免費備援 |
-| rag-answer-openrouter | Mistral Small 24B（free） | OpenRouter 備援 |
-| rag-answer-groq | Groq Llama/Mixtral | 低延遲備援 |
+| 別名                      | 後端                                               | 用途          | 回退順序 |
+| ----------------------- | ------------------------------------------------ | ----------- | ---- |
+| `rag-answer`            | `openai/gpt-5-mini-2025-08-07`                   | 主力 Chat/RAG | 1    |
+| `rag-answer-gemini`     | `gemini/2.5-flash`                               | 免費/低成本      | 2    |
+| `rag-answer-openrouter` | `openrouter/mistral-small-3.2-24b-instruct:free` | 社群/免費       | 3    |
+| `rag-answer-groq`       | `groq/llama-3.1-8b-instant`                      | 低延遲         | 4    |
 
-Graph 抽取：
+**圖譜抽取**
 
-| 入口名 | 後端 | 備註 |
-| --- | --- | --- |
-| graph-extractor | OpenAI mini | 預設；TokenCap 注入 JSON Schema |
-| graph-extractor-o1mini | OpenAI o1-mini | 備援 |
-| graph-extractor-gemini | Gemini 2.5 Flash | 超量或失敗時優先改道 |
+| 別名                       | 後端                             | 備註                  |
+| ------------------------ | ------------------------------ | ------------------- |
+| `graph-extractor`        | `openai/gpt-5-mini-2025-08-07` | 注入 JSON schema、溫度 0 |
+| `graph-extractor-o1mini` | `openai/o1-mini-2024-09-12`    | 中繼重試                |
+| `graph-extractor-gemini` | `gemini/2.5-flash`             | 尾端回退                |
 
-Embeddings / Rerank：
+**嵌入 / 重排序**
 
-| 入口名 | 後端 | 備註 |
-| --- | --- | --- |
-| local-embed | Ollama bge-m3 | 本地免費 |
-| reranker（Gateway） | bge-reranker-v2-m3 | 自架 API，GPU 最佳 |
+| 別名                     | 後端                   | 備註            |
+| ---------------------- | -------------------- | ------------- |
+| `local-embed`          | `ollama/bge-m3`      | 本地 embeddings |
+| `reranker`（透過 Gateway） | `bge-reranker-v2-m3` | 自託管重排序        |
 
-路由策略（TokenCap）：
+**路由重點**
 
-- 每日 OpenAI Token 計數 key：`tpd:openai:YYYY-MM-DD`
-- 多跳改道：
-  - graph-extractor → graph-extractor-gemini
-  - rag-answer → rag-answer-gemini → rag-answer-openrouter → rag-answer-groq
-- OPENAI_REROUTE_REAL=true：即使直接呼叫真實 OpenAI 型號也會改道
+* 策略：`usage_aware_fallback` + **TokenCap**（OpenAI 日額度）
+* Redis 計數 key：`tpd:openai:YYYY-MM-DD`
+* 回退鏈：
 
-## API
+  * `rag-answer` → `rag-answer-gemini` → `rag-answer-openrouter` → `rag-answer-groq`
+  * `graph-extractor` → `graph-extractor-o1mini` → `graph-extractor-o1mini` → `graph-extractor-gemini`
+* `OPENAI_REROUTE_REAL=true`：即使直接用 OpenAI 原名也會在超額時回退
+* 對外建議配發 `LITELLM_MASTER_KEY`；Gateway 內部呼叫使用 `LITELLM_KEY`
 
-LiteLLM（統一 API）
+---
 
-- Base URL：`http://localhost:9400/v1`
-- Auth：`Authorization: Bearer <LITELLM_MASTER_KEY>`
+## API（快速範例）
 
-範例（Python / LangChain）
+**LiteLLM（OpenAI 相容）— Base：`http://localhost:9400/v1`**
+
+Python（LangChain）：
 
 ```python
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-llm = ChatOpenAI(base_url="http://localhost:9400/v1", api_key="sk-admin", model="rag-answer", temperature=0.2)
-emb = OpenAIEmbeddings(base_url="http://localhost:9400/v1", api_key="sk-admin", model="local-embed")
+llm = ChatOpenAI(base_url="http://localhost:9400/v1", api_key="sk-admin",
+                 model="rag-answer", temperature=0.2)
+emb = OpenAIEmbeddings(base_url="http://localhost:9400/v1", api_key="sk-admin",
+                       model="local-embed")
 
-print(llm.invoke("用三行說明 RAG").content)
-print(len(emb.embed_query("GraphRAG 與 RAG 差異")))
+print(llm.invoke("用三行解釋 RAG").content)
+print(len(emb.embed_query("GraphRAG 與 RAG 的差異")))
 ```
 
-OpenAI 相容 REST
+cURL：
 
 ```bash
 curl -s http://localhost:9400/v1/chat/completions \
-  -H "Authorization: Bearer sk-admin" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"rag-answer","messages":[{"role":"user","content":"列出三點 RAG 優點"}]}'
+  -H "Authorization: Bearer sk-admin" -H "Content-Type: application/json" \
+  -d '{"model":"rag-answer","messages":[{"role":"user","content":"列出 RAG 的三個優點"}]}'
 ```
 
-API Gateway（應用層）
-
-- Base：`http://localhost:9800`
-- Auth：`X-API-Key: <key>`（預設 dev-key，可透過 `API_GATEWAY_KEYS` 調整）
-
-路由一覽：
-
-| 方法 | 路徑 | 功能 |
-| --- | --- | --- |
-| GET | /health | 健康檢查 |
-| GET | /whoami | 配置摘要（需金鑰） |
-| POST | /chat | Chat / JSON 模式（自動補提示） |
-| POST | /embed | 向量嵌入（local-embed） |
-| POST | /rerank | 文本重排（bge-reranker-v2-m3） |
-| POST | /graph/extract | Graph 抽取與 Schema 驗證 |
-
-請求示例：
+**API Gateway — Base：`http://localhost:9800`（X-API-Key）**
 
 ```bash
-# /chat
+# /chat（JSON 模式）
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"請用 JSON 回答兩點優點"}],"json_mode":true,"temperature":0.2}' \
+  -d '{"messages":[{"role":"user","content":"請用 JSON 回兩個要點"}],"json_mode":true,"temperature":0.2}' \
   http://localhost:9800/chat | jq
 
 # /embed
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
-  -d '{"texts":["RAG 是什麼？","GraphRAG 是什麼？"]}' \
+  -d '{"texts":["什麼是 RAG？","什麼是 GraphRAG？"]}' \
   http://localhost:9800/embed | jq
 
 # /rerank
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
-  -d '{"query":"生成式 AI 是什麼？","documents":["AI 是人工智慧","生成式 AI 可產生內容"],"top_n":2}' \
+  -d '{"query":"什麼是生成式 AI？","documents":["AI 是人工智慧","生成式 AI 可以創建內容"],"top_n":2}' \
   http://localhost:9800/rerank | jq
 
-# /graph/probe（輕量探測，不驗 schema）
+# /graph/probe（嚴格 JSON）
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"model":"graph-extractor","strict_json":true}' \
   http://localhost:9800/graph/probe | jq
 ```
 
+---
+
 ## Graph Schema
 
-- Repo 路徑：`schemas/graph_schema.json`
-- 容器路徑：`/app/schemas/graph_schema.json`（由 docker-compose 掛載）
-- 頂層結構：
+* **儲存庫**：`schemas/graph_schema.json`
+* **容器內**：`/app/schemas/graph_schema.json`（由 Compose 掛載）
+
+頂層結構：
 
 ```json
 {
@@ -388,78 +470,91 @@ curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
 }
 ```
 
-備註：`props[].value` 支援 string/number/boolean/null。
+* `props[].value` 支援 string / number / boolean / null
+* Gateway 與 TokenCap 啟動時會讀取並驗證（不合法時快速失敗）
 
-Gateway 與 TokenCap 只讀此檔案，啟動時驗證 Schema（若無效則 fail-fast）。
-
-Graph 抽取端點（建議走 Gateway）：
+圖譜抽取（透過 Gateway）：
 
 ```bash
 curl -s -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
-  -d '{"context":"Alice 於 2022 年加入 Acme 擔任工程師；Acme 總部在台北，創辦人 Bob。"}' \
+  -d '{"context":"Alice 於 2022 年加入 Acme 擔任工程師；Acme 總部在台北，由 Bob 創立。"}' \
   http://localhost:9800/graph/extract | jq
 ```
 
-常用參數：
-
-- context（必填）
-- min_nodes / min_edges（預設 1 / 1）
-- allow_empty（預設 false）
-- max_attempts（預設 2；每個 provider 嚴格一次、nudged 一次）
-- provider_chain（選填，覆寫預設鏈）
+---
 
 ## Reranker 與 Embeddings
 
-Embeddings（Ollama bge-m3）
+* **Embeddings**：LiteLLM 別名 `local-embed` → Ollama **bge-m3**
+* **Reranker**：BAAI **bge-reranker-v2-m3**
 
-- LiteLLM 模型名：`local-embed`
-- 在 LangChain 使用 `OpenAIEmbeddings` 指向 LiteLLM Base URL
+  * 直連：`POST http://localhost:9080/rerank`
+  * Gateway：`POST http://localhost:9800/rerank`
+  * 回應形狀：`{"ok": true, "results": [{"index": 1, "score": 0.83, "text": "..."}]}`
 
-Reranker（bge-reranker-v2-m3）
+---
 
--- 直接端點：`POST http://localhost:9080/rerank`
--- 經由 Gateway：`POST http://localhost:9800/rerank`
-- 回傳格式：`{"ok": true, "results": [{"index": 1, "score": 0.83, "text": "..."}]}`
+## 測試與驗證
 
-## 測試
-
-Unit 測試（快速，無外部服務需求）：
+**快速驗證**
 
 ```bash
-# 於 repo 根目錄，確保 PYTHONPATH 包含專案
+# 攝取
+curl -X POST http://localhost:9900/ingest/directory \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/data","extract_graph":true}' | jq
+
+# 混合檢索
+curl -X POST http://localhost:9800/retrieve \
+  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -d '{"query":"工程師技能","include_subgraph":true}' | jq
+
+# 圖譜數量
+curl -X POST http://localhost:9800/graph/query \
+  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -d '{"query":"MATCH (n) RETURN count(n) as total_nodes"}' | jq
+```
+
+**單元測試**（不依賴外部服務）：
+
+```bash
 PYTHONPATH=$(pwd) .venv/bin/pytest -q tests/unit
 ```
 
-Integration / smoke 測試（需透過 Docker Compose 啟動服務）：
+**整合測試**（需服務運行）：
 
 ```bash
 docker compose up -d --build
 PYTHONPATH=$(pwd) .venv/bin/pytest -q tests/integration
 ```
 
-如果不使用 repo 的 .venv，請先 `pip install -r requirements-dev.txt`。
+**基準測試**
 
-測試小提示：
+```bash
+# 批量攝取
+python services/ingestor/cli.py ./data --chunk-size 500 --no-graph
 
-- 在 repo 根目錄執行 pytest 時，使用 `PYTHONPATH=$(pwd)` 以便 `services.*` 匯入能被解析。
-- 執行單一測試檔：`PYTHONPATH=$(pwd) .venv/bin/pytest tests/unit/test_gateway_graph_extract.py -q`。
+# 查詢延遲
+for i in {1..10}; do
+  curl -w "@curl-format.txt" -X POST http://localhost:9800/retrieve \
+    -H "X-API-Key: dev-key" -d '{"query":"測試查詢"}'
+done
+```
 
-## Metrics (Prometheus)
+---
 
-API Gateway 提供一個可選的 `/metrics` 端點（於安裝 `prometheus-client` 時啟用）。
+## Metrics（Prometheus）
 
-安裝方式（本機或 CI）：
+Gateway 僅在安裝 `prometheus-client` 後才提供 `/metrics`：
 
 ```bash
 pip install prometheus-client
 ```
 
-行為說明：
+* 若已安裝：`/metrics` 回傳 Prometheus 格式（每端點請求計數與延遲）
+* 若未安裝：`/metrics` 回傳 **204**（避免在最小部署時出錯）
 
-- 若安裝 `prometheus-client`，`/metrics` 會回傳 Prometheus 格式的指標。Gateway 會收集每個路徑的請求數與請求延遲。
-- 若未安裝，`/metrics` 會回 204，方便在最小部署或 CI 中探測。
-
-Prometheus scraping 範例（prometheus.yml 的 `scrape_configs`）：
+Prometheus 抓取設定：
 
 ```yaml
 - job_name: 'free-rag-gateway'
@@ -469,54 +564,75 @@ Prometheus scraping 範例（prometheus.yml 的 `scrape_configs`）：
         service: gateway
 ```
 
-備註：
-
-- Gateway 使用 module-local CollectorRegistry（避免在測試或模組重載時重複註冊指標）
-- 建議在 CI 的測試步驟中安裝 `prometheus-client` 來驗證 metrics 行為
-
-## 開發環境與 pre-commit（簡短說明）
-
-建議在本機先安裝開發與測試所需套件，以加速開發並避免 pre-commit 第一次執行時下載大量依賴：
-
-```bash
-# 安裝開發依賴（只需在開發機執行一次）
-pip install -r requirements-dev.txt
-
-# 安裝 pre-commit hooks（會在 .git/hooks 中註冊）
-pip install pre-commit
-pre-commit install
-```
-
-注意：第一次在某台機器上執行 pre-commit 時，hooks 的隔離 venv 可能會下載 `requirements-dev.txt` 中列出的套件，導致該 commit 較慢。若想暫時略過 hooks，可使用 `git commit --no-verify`（僅在特殊情況下使用）。
-
-若覺得每次 commit 跑完整測試太慢，可考慮改為在 push 階段執行或在 pre-commit 只跑輕量檢查。
+---
 
 ## 疑難排解
 
-GPU / 平台差異：
+**服務啟不動**
 
-- `... platform (linux/arm64/v8) does not match (linux/amd64) ...` → 固定 `platform: linux/amd64` 或改用相容映像。
-- 無法偵測 GPU → 安裝 NVIDIA Container Toolkit；驗證：`docker run --gpus all nvidia/cuda:12.4.0-base nvidia-smi`。
+```bash
+docker compose ps
+docker compose logs <service>
+# M1/ARM
+export PLATFORM=linux/amd64
+docker compose up -d --build
+```
 
-環境變數未載入：
+**圖譜抽取逾時**
 
-- 看到 `WARN The "OPENAI_API_KEY" variable is not set` → 檢查 `.env` 與 `docker compose config` 展開結果。
+```bash
+curl http://localhost:9400/health
+curl -X POST http://localhost:9900/ingest/directory \
+  -d '{"path":"/data","chunk_size":500,"extract_graph":false}'
+```
 
-LiteLLM `/usage` 404：
+**搜尋為空**
 
-- 新版未保證提供 `/usage`，改看 UI 或 Proxy 日誌。
+```bash
+curl http://localhost:9143/api/ps         # Ollama
+curl http://localhost:6333/collections    # Qdrant
+# 重新索引
+curl -X POST http://localhost:9900/ingest/directory \
+  -d '{"path":"/data","force_reprocess":true}'
+```
 
-JSON 模式錯誤：
+**圖查詢錯誤**
 
-- 直打 LiteLLM 請設定 `response_format={"type":"json_object"}` 並在提示中要求 JSON；Gateway `/chat` 設定 `json_mode=true` 會自動補 system 提示。
+```bash
+curl http://localhost:7474/
+curl -X POST http://localhost:9800/graph/query \
+  -H "X-API-Key: dev-key" \
+  -d '{"query":"MATCH (n) RETURN count(n)"}'
+```
 
-Graph 抽取空內容/非法 JSON：
+**效能建議**
 
-- Gateway 會嘗試修正與正規化，仍失敗回 422 並附 provider 嘗試清單。確認 `schemas/graph_schema.json` 有效。
+* 攝取慢 → 降低 `chunk_size`，大型文件可先關 `extract_graph`
+* 記憶體高 → 限制並發、提高 Docker 記憶體
+* GPU 未啟用 → 安裝 NVIDIA Container Toolkit，容器內用 `nvidia-smi` 檢查
 
-已達 TPD 仍走 OpenAI：
+**限流 / 回退觸發**
 
-- 確認 `OPENAI_REROUTE_REAL=true`；檢查外掛日誌是否有 `reroute(hop ...)` 訊息。
+症狀：HTTP 429、回應中模型別名改變（fallback）、在達額後延遲短暫增加。
+
+檢查：
+
+```bash
+docker compose logs litellm | grep -i reroute | tail -20
+grep OPENAI_TPD_LIMIT docker-compose.yml .env || echo "not set"
+docker exec -it redis redis-cli KEYS tpd:openai:* | head
+grep -n "fallbacks:" configs/litellm.config.yaml
+```
+
+行動：
+
+* 調高 `OPENAI_TPD_LIMIT` 或降流量
+* 加入更多免費/低成本回退（如 OpenRouter）
+* 確保 Redis 健康（TokenCap 依賴計數）
+* 設 `OPENAI_REROUTE_REAL=false`：遇到 OpenAI 原生模型失敗時改為快速失敗
+* 透過 LiteLLM Dashboard（`/ui`）觀測
+
+---
 
 ## 專案結構
 
@@ -531,24 +647,47 @@ Graph 抽取空內容/非法 JSON：
 ├─ integrations/
 │  └─ litellm/
 │     └─ plugins/
-│        └─ token_cap.py     # TokenCap：TPD + 改道 + Schema 注入
+│        └─ token_cap.py     # TokenCap：TPD + 回退 + schema 注入
 ├─ containers/
-│  ├─ gateway/Dockerfile     # Gateway 容器
-│  └─ litellm/Dockerfile     # LiteLLM 容器
+│  ├─ gateway/Dockerfile
+│  └─ litellm/Dockerfile
 ├─ schemas/
-│  └─ graph_schema.json      # Graph JSON Schema（掛載到 /app/schemas）
+│  └─ graph_schema.json
 ├─ configs/
-│  └─ litellm.config.yaml    # 模型入口與路由策略
+│  └─ litellm.config.yaml
 ├─ tests/
-│  ├─ gateway/test_gateway.py
-│  └─ reranker/test_reranker.py
-├─ docker-compose.yml        # 一鍵部署
+│  ├─ unit/
+│  ├─ integration/
+│  └─ reranker/
+├─ docker-compose.yml
 ├─ pyproject.toml
-├─ README.md / README.zh-TW.md / ROADMAP.md
+├─ README.md / README.zh-TW.md
 └─ ...
 ```
 
+---
+
+## 貢獻
+
+歡迎 PR！請參考 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+快速開發配置：
+
+```bash
+pip install -r requirements-dev.txt
+pre-commit install
+PYTHONPATH=$(pwd) pytest tests/unit/
+```
+
+## 支援
+
+* 📖 文件：README + `docs/zh/api_usage.md`
+* 🐛 回報：GitHub Issues
+* 💬 討論：GitHub Discussions
+* 🔄 更新：替本專案加星與追蹤
+
 ## 授權
 
-- License：MIT
-- 歡迎 PR 與建議改善。
+MIT — 見 [LICENSE](LICENSE)。
+
+**自由開源** — 以零成本打造生產級 GraphRAG 基礎設施！🚀
