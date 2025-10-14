@@ -7,7 +7,9 @@
 
 </div>
 
-Zero-Cost RAG/GraphRAG Infrastructure — LangChain Compatible
+**Zero-Cost GraphRAG Infrastructure — Production-Ready & LangChain Compatible**
+
+Complete **Document → Vector Index → Knowledge Graph → Hybrid Retrieval** pipeline with automated ingestion, graph extraction, and intelligent query planning.
 
 <!-- Badges -->
 [![CI](https://github.com/tc3oliver/FreeRoute-RAG-Infra/actions/workflows/ci.yml/badge.svg)](https://github.com/tc3oliver/FreeRoute-RAG-Infra/actions/workflows/ci.yml)
@@ -135,36 +137,299 @@ Note: LangChain is recommended to connect directly to LiteLLM (9400). Applicatio
 - Docker 24+ (Compose v2)
 - Optional GPU: NVIDIA driver + Container Toolkit (Linux recommended CUDA 12.x)
 
-## Quick start
+## ✨ GraphRAG Features
 
-1) Create .env
+**Complete Document-to-Answer Pipeline:**
+- 📄 **Document Ingestion**: Auto-scan directories, chunk & index (Markdown, HTML, TXT)
+- 🔍 **Vector Search**: Semantic similarity with local embeddings (Ollama bge-m3)
+- 📊 **Knowledge Graph**: Auto-extract entities & relationships, store in Neo4j
+- 🔀 **Hybrid Retrieval**: Combine vector + graph + BM25 for comprehensive results
+- 🤖 **Query Planning**: Intelligent routing & answer generation with citations
+- 📈 **Observability**: Metrics, tracing, rate limiting, health checks
 
+**Infrastructure Components:**
+- 🚀 **API Gateway** (9800): Unified GraphRAG endpoints with auth & rate limiting
+- 🧠 **LiteLLM Proxy** (9400): Multi-provider LLM routing with TokenCap & fallbacks
+- 📚 **Ingestor Service** (9900): Batch document processing & knowledge extraction
+- 🗄️ **Storage Layer**: Qdrant (vectors) + Neo4j (graph) + Redis (cache) + Postgres (metadata)
+
+## Quick Start
+
+### 1. Environment Setup
+
+Create `.env` file:
 ```bash
-# .env (example)
-OPENAI_API_KEY=...
-GOOGLE_API_KEY=...
-OPENROUTER_API_KEY=...
-GROQ_API_KEY=...
-# Optional: API_GATEWAY_KEYS=dev-key,another-key
+# .env (required)
+OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=AIza...
+OPENROUTER_API_KEY=sk-or-...
+GROQ_API_KEY=gsk_...
+
+# Optional: customize settings
+API_GATEWAY_KEYS=dev-key,prod-key
+NEO4J_PASSWORD=neo4j123
+POSTGRES_PASSWORD=postgres123
+CHUNK_SIZE=1000
 ```
 
-2) Start
+### 2. Start All Services
 
 ```bash
 docker compose up -d --build
 ```
 
-3) Health checks
+This starts:
+- **LiteLLM Proxy** (9400) + Dashboard UI
+- **API Gateway** (9800) with GraphRAG endpoints
+- **Ingestor Service** (9900) for document processing
+- **Qdrant** (6333), **Neo4j** (7474/7687), **Redis** (6379)
+- **Ollama** (9143) for local embeddings
+- **Reranker** (9080) for result re-ranking
+
+### 3. Health Checks
 
 ```bash
-curl -s http://localhost:9400/health || curl -s http://localhost:9400/health/readiness | jq
-curl -s http://localhost:9800/health | jq
+curl -s http://localhost:9800/health | jq     # Gateway
+curl -s http://localhost:9900/health | jq     # Ingestor
+curl -s http://localhost:9400/health | jq     # LiteLLM
+curl -s http://localhost:6333/ | jq           # Qdrant
 ```
 
-4) Dashboard
+### 4. Dashboard Access
 
--- URL: http://localhost:9400/ui
-- Default credentials: admin / admin123 (change ASAP)
+**LiteLLM Dashboard**: http://localhost:9400/ui
+- Username: `admin` / Password: `admin123` (change ASAP)
+- Monitor API usage, costs, and provider health
+
+**Neo4j Browser**: http://localhost:7474/
+- Username: `neo4j` / Password: `neo4j123` (or your `NEO4J_PASSWORD`)
+- Explore knowledge graph visually
+
+## 🚀 End-to-End GraphRAG Usage
+
+### Step 1: Document Ingestion
+
+```bash
+# Create sample documents
+mkdir -p data
+echo "Alice Johnson is a Senior Software Engineer at Acme Corporation in Taipei. She specializes in Python, GraphRAG, and AI systems." > data/alice.md
+
+# Ingest documents (auto-chunks + embeds + extracts graph)
+curl -X POST http://localhost:9900/ingest/directory \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "/data",
+    "collection": "knowledge_base",
+    "file_patterns": ["*.md", "*.txt"],
+    "chunk_size": 800,
+    "extract_graph": true,
+    "force_reprocess": true
+  }' | jq
+```
+
+### Step 2: Hybrid Search & Retrieval
+
+```bash
+# Semantic vector search
+curl -X POST http://localhost:9800/search \
+  -H "X-API-Key: dev-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Python engineer skills",
+    "top_k": 3,
+    "collection": "knowledge_base"
+  }' | jq
+
+# GraphRAG hybrid retrieval (vector + knowledge graph)
+curl -X POST http://localhost:9800/retrieve \
+  -H "X-API-Key: dev-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Who works at Acme Corporation and what are their skills?",
+    "top_k": 5,
+    "include_subgraph": true,
+    "max_hops": 2
+  }' | jq
+```
+
+### Step 3: Knowledge Graph Queries
+
+```bash
+# Direct graph queries (Cypher)
+curl -X POST http://localhost:9800/graph/query \
+  -H "X-API-Key: dev-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "MATCH (p:Person)-[r]-(c:Company) RETURN p.id, type(r), c.id LIMIT 10"
+  }' | jq
+
+# Manual graph updates
+curl -X POST http://localhost:9800/graph/upsert \
+  -H "X-API-Key: dev-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "nodes": [{"id": "Bob", "type": "Person", "props": [{"key": "role", "value": "Manager"}]}],
+      "edges": [{"src": "Bob", "dst": "Acme Corporation", "type": "MANAGES", "props": []}]
+    }
+  }' | jq
+```
+
+### Step 4: CLI Tools (Alternative)
+
+```bash
+# Use ingestor CLI for batch processing
+cd services/ingestor
+pip install -r requirements.txt
+
+python cli.py ../../data \
+  --collection mydata \
+  --chunk-size 1000 \
+  --ingestor-url http://localhost:9900
+```
+
+## 📖 Complete API Reference
+
+### Ingestor Service (Port 9900)
+
+#### `POST /ingest/directory`
+Batch document ingestion with auto-chunking and graph extraction.
+
+**Request:**
+```json
+{
+  "path": "/data",
+  "collection": "chunks",
+  "file_patterns": ["*.md", "*.txt", "*.html"],
+  "chunk_size": 1000,
+  "chunk_overlap": 200,
+  "extract_graph": true,
+  "force_reprocess": false
+}
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "message": "Processed 3/3 files",
+  "stats": {
+    "files_found": 3,
+    "files_processed": 3,
+    "chunks_created": 12,
+    "graphs_extracted": 3,
+    "processing_time_sec": 45.2
+  },
+  "processed_files": ["doc1.md", "doc2.md"],
+  "errors": []
+}
+```
+
+### API Gateway (Port 9800)
+
+#### `POST /index/chunks`
+Index text chunks into vector database.
+
+**Request:**
+```json
+{
+  "collection": "chunks",
+  "chunks": [
+    {
+      "doc_id": "doc1",
+      "text": "Alice works at Acme Corp...",
+      "metadata": {"source": "document", "section": "bio"}
+    }
+  ]
+}
+```
+
+#### `POST /search`
+Semantic vector search.
+
+**Request:**
+```json
+{
+  "query": "Python engineer skills",
+  "top_k": 5,
+  "collection": "chunks",
+  "filters": {"metadata.source": "resume"}
+}
+```
+
+#### `POST /retrieve` ⭐
+**GraphRAG Hybrid Retrieval** - Core endpoint combining vector + graph search.
+
+**Request:**
+```json
+{
+  "query": "Who works at Acme and what skills do they have?",
+  "top_k": 5,
+  "collection": "chunks",
+  "include_subgraph": true,
+  "max_hops": 2,
+  "filters": null
+}
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "hits": [
+    {
+      "text": "Alice Johnson is a Senior Software Engineer...",
+      "metadata": {"doc_id": "alice.md"},
+      "citations": [{"source": "vector", "doc_id": "alice.md", "score": 0.89}],
+      "score": 0.89
+    }
+  ],
+  "subgraph": {
+    "nodes": [
+      {"id": "Alice Johnson", "type": "Person", "props": {"role": "Engineer"}},
+      {"id": "Acme Corporation", "type": "Company", "props": {"location": "Taipei"}}
+    ],
+    "edges": [
+      {"src": "Alice Johnson", "dst": "Acme Corporation", "type": "WORKS_AT", "props": {}}
+    ]
+  },
+  "query_time_ms": 150
+}
+```
+
+#### `POST /graph/upsert`
+Insert/update knowledge graph data.
+
+**Request:**
+```json
+{
+  "data": {
+    "nodes": [
+      {"id": "Alice", "type": "Person", "props": [{"key": "role", "value": "Engineer"}]}
+    ],
+    "edges": [
+      {"src": "Alice", "dst": "Acme", "type": "WORKS_AT", "props": []}
+    ]
+  }
+}
+```
+
+#### `POST /graph/query`
+Execute Cypher queries on knowledge graph.
+
+**Request:**
+```json
+{
+  "query": "MATCH (p:Person)-[r]->(c:Company) RETURN p.id, type(r), c.id",
+  "params": {"limit": 10}
+}
+```
+
+#### Legacy Endpoints
+- `POST /chat` - Chat completions with JSON mode support
+- `POST /embed` - Text embeddings via local-embed model
+- `POST /rerank` - Text reranking via local bge-reranker
+- `POST /graph/extract` - Extract knowledge graph from text context
 
 First run notes:
 
@@ -188,34 +453,50 @@ Put configuration in .env. Do not commit .env to version control.
 | TZ | Asia/Taipei | Time zone |
 | TZ_OFFSET_HOURS | 8 | Time zone offset used for daily counters in Redis |
 | API_GATEWAY_KEYS | dev-key,another-key | Allowed X-API-Key list for the Gateway |
+| NEO4J_PASSWORD | neo4j123 | Neo4j database password |
+| POSTGRES_PASSWORD | postgres123 | PostgreSQL database password |
+| CHUNK_SIZE | 1000 | Default text chunk size for document processing |
+| CHUNK_OVERLAP | 200 | Overlap between text chunks |
 
-API Gateway extras:
-
-- LITELLM_BASE (default http://litellm:4000/v1): Base URL to talk to LiteLLM
-- LITELLM_KEY (default sk-admin): Admin key used by the Gateway when calling LiteLLM
-- RERANKER_URL (default http://reranker:8080; if unset, app defaults to 80): Reranker URL
-- GRAPH_SCHEMA_PATH (default `/app/schemas/graph_schema.json`): Shared Graph Schema (mounted from `./schemas/graph_schema.json`)
-- GRAPH_MIN_NODES / GRAPH_MIN_EDGES (default 1 / 1): /graph/extract thresholds
-- GRAPH_ALLOW_EMPTY (default false): Allow empty output to pass thresholds
-- GRAPH_MAX_ATTEMPTS (default 2): Attempts per provider (strict → nudge)
-- GRAPH_PROVIDER_CHAIN (default `graph-extractor,graph-extractor-o1mini,graph-extractor-gemini`): Provider order
+**GraphRAG-Specific Variables:**
+- `QDRANT_URL` (default http://qdrant:6333): Vector database connection
+- `NEO4J_URI` (default bolt://neo4j:7687): Graph database connection
+- `GATEWAY_BASE` (default http://apigw:8000): Ingestor → Gateway communication
+- `GATEWAY_API_KEY` (default dev-key): API key for ingestor service
+- `GRAPH_SCHEMA_PATH` (default /app/schemas/graph_schema.json): Knowledge graph schema
+- `GRAPH_MIN_NODES/GRAPH_MIN_EDGES` (default 1/1): Graph extraction thresholds
+- `GRAPH_PROVIDER_CHAIN`: LLM fallback order for graph extraction
 
 Cost protection:
 
 - `litellm.config.yaml` sets `general_settings.max_budget_per_day: 0.0` to avoid unexpected costs.
 - TokenCap enforces the daily OpenAI token limit via `OPENAI_TPD_LIMIT`; compose defaults to 9M (reserve ~1M for system).
 
-## Services and ports
+## 🏗️ Architecture & Services
 
-| Service | Port | Description |
-| --- | ---: | --- |
-| LiteLLM Proxy | 9400 | OpenAI-compatible API (for LangChain/SDK) |
-| Dashboard UI | 9400 | http://localhost:9400/ui |
-| API Gateway | 9800 | /chat /embed /rerank /graph/extract |
-| Reranker | 9080 | POST /rerank (bge-reranker-v2-m3) |
-| Ollama | 9143 | bge-m3 embeddings |
-| Redis | 6379 | Token counters / cache |
-| Postgres | 5432 | Internal by default (not exposed) |
+### Service Overview
+
+| Service | Port | Description | Key Features |
+|---------|------|-------------|--------------|
+| **API Gateway** | 9800 | GraphRAG unified API | `/retrieve`, `/search`, `/index/chunks`, `/graph/*` |
+| **Ingestor** | 9900 | Document processing | Batch ingestion, chunking, graph extraction |
+| **LiteLLM Proxy** | 9400 | Multi-LLM router + UI | TokenCap, fallbacks, OpenAI-compatible |
+| **Qdrant** | 6333 | Vector database | Semantic search, embeddings storage |
+| **Neo4j** | 7474/7687 | Graph database | Knowledge graph, Cypher queries |
+| **Ollama** | 9143 | Local embeddings | bge-m3 model, GPU-accelerated |
+| **Reranker** | 9080 | Result reranking | bge-reranker-v2-m3, precision boost |
+| **Redis** | 6379 | Cache & counters | Token limits, session storage |
+| **Postgres** | 5432 | Metadata storage | LiteLLM configuration, user data |
+
+### Data Flow
+
+```
+Documents → [Ingestor] → Chunks → [Qdrant] ← [API Gateway] ← User Query
+              ↓                     ↑
+         Graph Extract → [Neo4j] ────┘
+              ↓
+          [LiteLLM] → Multiple LLM Providers
+```
 
 ## Free tiers and sources
 
@@ -402,28 +683,53 @@ Reranker (bge-reranker-v2-m3)
 -- Via Gateway: `POST http://localhost:9800/rerank`
 - Response: `{"ok": true, "results": [{"index": 1, "score": 0.83, "text": "..."}]}`
 
-## Testing
+## 🧪 Testing & Validation
 
-Unit tests (fast, no external services):
+### Quick Validation
 
 ```bash
-# from repo root, ensure PYTHONPATH includes repo
+# Test document ingestion pipeline
+curl -X POST http://localhost:9900/ingest/directory \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/data", "extract_graph": true}' | jq
+
+# Test GraphRAG hybrid retrieval
+curl -X POST http://localhost:9800/retrieve \
+  -H "X-API-Key: dev-key" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "engineer skills", "include_subgraph": true}' | jq
+
+# Verify knowledge graph
+curl -X POST http://localhost:9800/graph/query \
+  -H "X-API-Key: dev-key" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "MATCH (n) RETURN count(n) as total_nodes"}' | jq
+```
+
+### Comprehensive Testing
+
+**Unit Tests** (fast, no external services):
+```bash
 PYTHONPATH=$(pwd) .venv/bin/pytest -q tests/unit
 ```
 
-Integration and smoke tests (requires services running via Docker Compose):
-
+**Integration Tests** (requires running services):
 ```bash
 docker compose up -d --build
 PYTHONPATH=$(pwd) .venv/bin/pytest -q tests/integration
 ```
 
-If you don't use the repo `.venv`, run `pip install -r requirements-dev.txt` first.
+**Performance Benchmarks:**
+```bash
+# Bulk ingestion test
+python services/ingestor/cli.py ./data --chunk-size 500 --no-graph
 
-Test tips:
-
-- Use `PYTHONPATH=$(pwd)` when running pytest from repo root so `services.*` imports resolve.
-- To run a single test file: `PYTHONPATH=$(pwd) .venv/bin/pytest tests/unit/test_gateway_graph_extract.py -q`.
+# Query latency test
+for i in {1..10}; do
+  curl -w "@curl-format.txt" -X POST http://localhost:9800/retrieve \
+    -H "X-API-Key: dev-key" -d '{"query": "test query"}'
+done
+```
 
 ### Metrics (Prometheus)
 The API Gateway exposes an optional `/metrics` endpoint when the `prometheus-client` package is installed.
@@ -469,32 +775,73 @@ Note: On the first run on a machine, the pre-commit hook's isolated venv may dow
 
 If running the full test suite on every commit is too slow for your workflow, consider running tests at push time or configuring the pre-commit hook to run a smaller subset of checks.
 
-## Troubleshooting
+## 🔧 Troubleshooting
 
-GPU / platform differences:
+### Common Issues
 
-- `... platform (linux/arm64/v8) does not match (linux/amd64) ...` → pin `platform: linux/amd64` or use a compatible image.
-- GPU not detected → install NVIDIA Container Toolkit; verify via `docker run --gpus all nvidia/cuda:12.4.0-base nvidia-smi`.
+**Services won't start:**
+```bash
+# Check service status
+docker compose ps
+docker compose logs <service_name>
 
-Env vars not loaded:
+# Fix: Platform compatibility (M1 Mac / ARM)
+export PLATFORM=linux/amd64
+docker compose up -d --build
+```
 
-- See `WARN The "OPENAI_API_KEY" variable is not set` → check `.env` and `docker compose config` output.
+**Graph extraction timeouts:**
+```bash
+# Check LiteLLM API health
+curl http://localhost:9400/health
 
-LiteLLM `/usage` 404:
+# Reduce document size for graph extraction
+curl -X POST http://localhost:9900/ingest/directory \
+  -d '{"path": "/data", "chunk_size": 500, "extract_graph": false}'
+```
 
-- Newer versions may not expose `/usage`; check the UI or proxy logs instead.
+**Empty search results:**
+```bash
+# Verify embeddings model is ready
+curl http://localhost:9143/api/ps
 
-JSON mode issues:
+# Check vector database
+curl http://localhost:6333/collections
 
-- When calling LiteLLM directly, set `response_format={"type":"json_object"}` and prompt for JSON. Gateway `/chat` with `json_mode=true` injects the hint automatically.
+# Re-index if needed
+curl -X POST http://localhost:9900/ingest/directory \
+  -d '{"path": "/data", "force_reprocess": true}'
+```
 
-Graph extraction empty/invalid JSON:
+**Graph queries fail:**
+```bash
+# Check Neo4j connectivity
+curl http://localhost:7474/
+# Browser: http://localhost:7474/ (neo4j/neo4j123)
 
-- The Gateway attempts to repair/normalize; if still invalid, it returns 422 with attempts included. Ensure `schemas/graph_schema.json` is valid.
+# Verify graph data exists
+curl -X POST http://localhost:9800/graph/query \
+  -H "X-API-Key: dev-key" \
+  -d '{"query": "MATCH (n) RETURN count(n)"}'
+```
 
-OpenAI calls still used after TPD reached:
+**Performance Issues:**
+- **Slow ingestion**: Reduce `chunk_size`, disable `extract_graph` for large documents
+- **High memory usage**: Limit concurrent processing, increase Docker memory allocation
+- **GPU not used**: Install NVIDIA Container Toolkit, verify `nvidia-smi` in containers
 
-- Ensure `OPENAI_REROUTE_REAL=true`; check plugin logs for `reroute(hop ...)` messages.
+### Log Analysis
+
+```bash
+# Check all service logs
+docker compose logs --tail=50
+
+# Focus on specific services
+docker compose logs ingestor apigw litellm qdrant neo4j
+
+# Real-time monitoring
+docker compose logs -f ingestor
+```
 
 ## Project structure
 
@@ -527,11 +874,38 @@ OpenAI calls still used after TPD reached:
 │     └─ test_reranker.py
 ├─ docker-compose.yml        # One-command deploy
 ├─ pyproject.toml
-├─ README.md / README.zh-TW.md / ROADMAP.md
+├─ README.md / README.zh-TW.md
 └─ ...
 ```
 
-## License
+## 🤝 Contributing
 
-- License: MIT
-- PRs and suggestions are welcome.
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+### Development Setup
+
+```bash
+# Clone and setup
+git clone https://github.com/tc3oliver/FreeRoute-RAG-Infra.git
+cd FreeRoute-RAG-Infra
+
+# Install dev dependencies
+pip install -r requirements-dev.txt
+pre-commit install
+
+# Run tests
+PYTHONPATH=$(pwd) pytest tests/unit/
+```
+
+### 🆘 Support
+
+- 📖 **Documentation**: This README provides complete usage guide
+- 🐛 **Issues**: [GitHub Issues](https://github.com/tc3oliver/FreeRoute-RAG-Infra/issues)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/tc3oliver/FreeRoute-RAG-Infra/discussions)
+- 🔄 **Updates**: Star & watch the repo for latest features
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+**Free & Open Source** - Build production GraphRAG infrastructure at zero cost! 🚀

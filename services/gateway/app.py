@@ -1,12 +1,14 @@
 # === 標準函式庫 ===
 import hashlib
+import importlib
 import json
 import logging
 import os
 import time
 import uuid
+import uuid as uuidlib
 from contextvars import ContextVar
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # === 第三方套件 ===
 import requests
@@ -20,6 +22,10 @@ from pydantic import BaseModel, Field
 LITELLM_BASE = os.environ.get("LITELLM_BASE", "http://litellm:4000/v1").rstrip("/")
 LITELLM_KEY = os.environ.get("LITELLM_KEY", "sk-admin")
 RERANKER_URL = os.environ.get("RERANKER_URL", "http://reranker:8080")
+QDRANT_URL = os.environ.get("QDRANT_URL")  # e.g., http://qdrant:6333
+NEO4J_URI = os.environ.get("NEO4J_URI")  # e.g., bolt://neo4j:7687
+NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD")
 
 API_KEYS = {k.strip() for k in os.environ.get("API_GATEWAY_KEYS", "dev-key").split(",") if k.strip()}
 
@@ -325,6 +331,116 @@ class GraphProbeReq(BaseModel):
     messages: Optional[List[Dict[str, str]]] = None
 
 
+# ========== Index/Search (Vector) 請求/回應模型 ==========
+class ChunkItem(BaseModel):
+    doc_id: str
+    text: str
+    chunk_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class IndexChunksReq(BaseModel):
+    chunks: List[ChunkItem]
+    collection: str = Field(default="chunks", description="Qdrant collection name")
+
+
+class IndexChunksResp(BaseModel):
+    ok: bool
+    upserted: int
+    dim: int
+    collection: str
+
+
+class SearchReq(BaseModel):
+    query: str
+    top_k: int = 5
+    collection: str = "chunks"
+    filters: Optional[Dict[str, Any]] = None
+
+
+class SearchHit(BaseModel):
+    id: Any
+    score: float
+    payload: Dict[str, Any]
+
+
+class SearchResp(BaseModel):
+    ok: bool
+    hits: List[SearchHit]
+
+
+# ========== Graph Upsert/Query 請求/回應模型 ==========
+class GraphUpsertReq(BaseModel):
+    data: GraphData
+
+
+class GraphUpsertResp(BaseModel):
+    ok: bool
+    nodes: int
+    edges: int
+
+
+class GraphQueryReq(BaseModel):
+    query: str
+    params: Optional[Dict[str, Any]] = None
+
+
+class GraphQueryResp(BaseModel):
+    ok: bool
+    records: List[Dict[str, Any]]
+
+
+# ========== Hybrid Retrieval 請求/回應模型 ==========
+class RetrieveReq(BaseModel):
+    query: str
+    top_k: int = 5
+    collection: str = "chunks"
+    include_subgraph: bool = True
+    max_hops: int = 1
+    filters: Optional[Dict[str, Any]] = None
+
+
+class Citation(BaseModel):
+    source: str  # "vector" | "graph" | "hybrid"
+    doc_id: Optional[str] = None
+    chunk_id: Optional[str] = None
+    node_id: Optional[str] = None
+    edge_type: Optional[str] = None
+    score: Optional[float] = None
+
+
+class RetrieveHit(BaseModel):
+    text: str
+    metadata: Dict[str, Any]
+    citations: List[Citation]
+    score: Optional[float] = None
+
+
+class SubgraphNode(BaseModel):
+    id: str
+    type: str
+    props: Dict[str, Any]
+
+
+class SubgraphEdge(BaseModel):
+    src: str
+    dst: str
+    type: str
+    props: Dict[str, Any]
+
+
+class Subgraph(BaseModel):
+    nodes: List[SubgraphNode]
+    edges: List[SubgraphEdge]
+
+
+class RetrieveResp(BaseModel):
+    ok: bool
+    hits: List[RetrieveHit]
+    subgraph: Optional[Subgraph] = None
+    query_time_ms: int
+
+
 ENTRYPOINTS = {"rag-answer", "graph-extractor"}
 DEFAULTS = {"chat": "rag-answer", "graph": "graph-extractor"}
 
@@ -399,6 +515,10 @@ def _kvize(obj: Any) -> List[Dict[str, Any]]:
                 good.append({"key": str(it["key"]), "value": it["value"]})
         return good
     return []
+
+
+def _sha1(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
 
 
 def _dedup_merge_nodes(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -499,6 +619,42 @@ def _prune_graph(data: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
+# ========== 可選整合：Qdrant（lazy import） ==========
+def _get_qdrant_client():
+    if not QDRANT_URL:
+        raise RuntimeError("qdrant_unavailable: missing QDRANT_URL env")
+    try:
+        qdc_mod = importlib.import_module("qdrant_client")
+        QdrantClient = getattr(qdc_mod, "QdrantClient")
+        return QdrantClient(url=QDRANT_URL)
+    except Exception as e:
+        raise RuntimeError(f"qdrant_unavailable: {e}")
+
+
+def _ensure_qdrant_collection(client, name: str, dim: int) -> None:
+    try:
+        models_mod = importlib.import_module("qdrant_client.models")
+        Distance = getattr(models_mod, "Distance")
+        VectorParams = getattr(models_mod, "VectorParams")
+        client.get_collection(name)
+    except Exception:
+        client.recreate_collection(
+            collection_name=name, vectors_config=VectorParams(size=dim, distance=Distance.COSINE)
+        )
+
+
+# ========== 可選整合：Neo4j（lazy import） ==========
+def _get_neo4j_driver():
+    if not (NEO4J_URI and NEO4J_PASSWORD):
+        raise RuntimeError("neo4j_unavailable: missing NEO4J_URI/NEO4J_PASSWORD env")
+    try:
+        neo4j_mod = importlib.import_module("neo4j")
+        GraphDatabase = getattr(neo4j_mod, "GraphDatabase")
+        return GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+    except Exception as e:
+        raise RuntimeError(f"neo4j_unavailable: {e}")
+
+
 # === API 路由 ===
 @app.get("/health", response_model=HealthResp, tags=["meta"])
 def health() -> Dict[str, Any]:
@@ -544,6 +700,225 @@ def metrics() -> Response:
         # fallback to default collector if registry call fails
         data = generate_latest()
     return PlainTextResponse(content=data, media_type=CONTENT_TYPE_LATEST)
+
+
+# ========== 新增：Index/Vector 檢索 API ==========
+@app.post("/index/chunks", dependencies=[Depends(require_key)], response_model=IndexChunksResp, tags=["index"])
+def index_chunks(req: IndexChunksReq) -> Dict[str, Any]:
+    if not req.chunks:
+        raise HTTPException(status_code=400, detail="chunks must be non-empty")
+    # 1) 取得向量
+    texts = [c.text for c in req.chunks]
+    try:
+        emb = client.embeddings.create(model="local-embed", input=texts)
+        vectors = [d.embedding for d in emb.data]
+    except Exception as e:
+        logger.exception("/index/chunks embed error")
+        raise HTTPException(status_code=502, detail=f"embed_error: {e}")
+
+    dim = len(vectors[0]) if vectors else 0
+    # 2) 寫入 Qdrant
+    try:
+        qc = _get_qdrant_client()
+        _ensure_qdrant_collection(qc, req.collection, dim)
+        models_mod = importlib.import_module("qdrant_client.models")
+        PointStruct = getattr(models_mod, "PointStruct")
+
+        points = []
+        for c, vec in zip(req.chunks, vectors):
+            # Qdrant 只接受 UUID 或 uint 作為 id
+            pid = None
+            if c.chunk_id:
+                try:
+                    # 驗證是否為合法 UUID
+                    pid = str(uuidlib.UUID(str(c.chunk_id)))
+                except Exception:
+                    pid = None
+            if not pid:
+                pid = str(uuidlib.uuid4())
+            payload = {
+                "doc_id": c.doc_id,
+                "text": c.text,
+                "metadata": c.metadata or {},
+                "hash": _sha1(c.text),
+            }
+            points.append(PointStruct(id=pid, vector=vec, payload=payload))
+        qc.upsert(collection_name=req.collection, points=points)
+        return {"ok": True, "upserted": len(points), "dim": dim, "collection": req.collection}
+    except RuntimeError as re:
+        raise HTTPException(status_code=503, detail=str(re))
+    except Exception as e:
+        logger.exception("/index/chunks qdrant error")
+        raise HTTPException(status_code=502, detail=f"qdrant_error: {e}")
+
+
+@app.post("/search", dependencies=[Depends(require_key)], response_model=SearchResp, tags=["search"])
+def search(req: SearchReq) -> Dict[str, Any]:
+    try:
+        emb = client.embeddings.create(model="local-embed", input=[req.query])
+        qvec = emb.data[0].embedding
+    except Exception as e:
+        logger.exception("/search embed error")
+        raise HTTPException(status_code=502, detail=f"embed_error: {e}")
+
+    try:
+        qc = _get_qdrant_client()
+        models_mod = importlib.import_module("qdrant_client.models")
+        Filter = getattr(models_mod, "Filter")
+
+        flt = None
+        if req.filters:
+            # 簡化：直接傳遞 dict 給 Filter.from_dict
+            flt = Filter.from_dict(req.filters)
+        results = qc.search(collection_name=req.collection, query_vector=qvec, limit=req.top_k, query_filter=flt)
+        hits = []
+        for r in results:
+            hits.append({"id": getattr(r, "id", None), "score": r.score, "payload": r.payload or {}})
+        return {"ok": True, "hits": hits}
+    except RuntimeError as re:
+        raise HTTPException(status_code=503, detail=str(re))
+    except Exception as e:
+        logger.exception("/search qdrant error")
+        raise HTTPException(status_code=502, detail=f"qdrant_error: {e}")
+
+
+@app.post("/retrieve", dependencies=[Depends(require_key)], response_model=RetrieveResp, tags=["retrieve"])
+def retrieve(req: RetrieveReq) -> Dict[str, Any]:
+    """混合檢索：結合向量搜尋與圖譜鄰域展開"""
+    start_time = time.time()
+
+    # 1) 向量檢索
+    vector_hits = []
+    try:
+        emb = client.embeddings.create(model="local-embed", input=[req.query])
+        qvec = emb.data[0].embedding
+
+        qc = _get_qdrant_client()
+        models_mod = importlib.import_module("qdrant_client.models")
+        Filter = getattr(models_mod, "Filter")
+
+        flt = None
+        if req.filters:
+            flt = Filter.from_dict(req.filters)
+
+        results = qc.search(collection_name=req.collection, query_vector=qvec, limit=req.top_k, query_filter=flt)
+
+        for r in results:
+            payload = r.payload or {}
+            citation = Citation(source="vector", doc_id=payload.get("doc_id"), score=r.score)
+            hit = RetrieveHit(
+                text=payload.get("text", ""), metadata=payload.get("metadata", {}), citations=[citation], score=r.score
+            )
+            vector_hits.append(hit)
+
+    except Exception:
+        logger.exception("/retrieve vector search error")
+        # 繼續執行，不因向量檢索失敗而中斷
+
+    # 2) 圖譜檢索（根據 query 中的關鍵實體）
+    subgraph_data = None
+    if req.include_subgraph:
+        try:
+            driver = _get_neo4j_driver()
+
+            # 簡單策略：查找名稱包含 query 關鍵字的節點及其鄰域
+            query_keywords = [kw.strip() for kw in req.query.lower().split() if len(kw.strip()) > 2]
+
+            with driver.session() as session:
+                # 查找相關節點
+                match_nodes = []
+                for keyword in query_keywords[:3]:  # 限制關鍵字數量
+                    rs = session.run(
+                        """
+                        MATCH (n)
+                        WHERE toLower(n.id) CONTAINS $keyword
+                           OR ANY(prop IN keys(n) WHERE toLower(toString(n[prop])) CONTAINS $keyword)
+                        RETURN DISTINCT n.id as id, n.type as type, properties(n) as props
+                        LIMIT 5
+                    """,
+                        keyword=keyword,
+                    )
+                    match_nodes.extend([record.data() for record in rs])
+
+                # 去重
+                seen_ids = set()
+                unique_nodes = []
+                for node in match_nodes:
+                    if node["id"] not in seen_ids:
+                        unique_nodes.append(node)
+                        seen_ids.add(node["id"])
+
+                # 擴展鄰域
+                all_nodes = []
+                all_edges = []
+
+                for node in unique_nodes[:3]:  # 限制種子節點數量
+                    node_id = node["id"]
+
+                    # 獲取鄰域
+                    rs = session.run(
+                        f"""
+                        MATCH (a {{id: $id}})-[r]-(b)
+                        RETURN
+                            a.id as src_id, a.type as src_type, properties(a) as src_props,
+                            type(r) as rel_type, properties(r) as rel_props,
+                            b.id as dst_id, b.type as dst_type, properties(b) as dst_props,
+                            startNode(r).id = $id as is_outgoing
+                        LIMIT {req.max_hops * 10}
+                    """,
+                        id=node_id,
+                    )
+
+                    for record in rs:
+                        data = record.data()
+
+                        # 添加節點
+                        src_node = SubgraphNode(
+                            id=data["src_id"], type=data["src_type"] or "Entity", props=data["src_props"] or {}
+                        )
+                        dst_node = SubgraphNode(
+                            id=data["dst_id"], type=data["dst_type"] or "Entity", props=data["dst_props"] or {}
+                        )
+
+                        if src_node not in all_nodes:
+                            all_nodes.append(src_node)
+                        if dst_node not in all_nodes:
+                            all_nodes.append(dst_node)
+
+                        # 添加邊
+                        if data["is_outgoing"]:
+                            edge = SubgraphEdge(
+                                src=data["src_id"],
+                                dst=data["dst_id"],
+                                type=data["rel_type"],
+                                props=data["rel_props"] or {},
+                            )
+                        else:
+                            edge = SubgraphEdge(
+                                src=data["dst_id"],
+                                dst=data["src_id"],
+                                type=data["rel_type"],
+                                props=data["rel_props"] or {},
+                            )
+
+                        if edge not in all_edges:
+                            all_edges.append(edge)
+
+                if all_nodes:
+                    subgraph_data = Subgraph(nodes=all_nodes, edges=all_edges)
+
+        except Exception:
+            logger.exception("/retrieve graph expansion error")
+            # 繼續執行，不因圖檢索失敗而中斷
+
+    query_time = int((time.time() - start_time) * 1000)
+
+    return {
+        "ok": True,
+        "hits": vector_hits,
+        "subgraph": subgraph_data.dict() if subgraph_data else None,
+        "query_time_ms": query_time,
+    }
 
 
 @app.post("/chat", dependencies=[Depends(require_key)], response_model=ChatResp, tags=["chat"])
@@ -605,6 +980,83 @@ def rerank(req: RerankReq) -> Dict[str, Any]:
     except Exception as e:
         logger.exception("/rerank upstream error")
         raise HTTPException(status_code=502, detail=f"rerank_error: {e}")
+
+
+# ========== 新增：Graph Upsert/Query API ==========
+@app.post("/graph/upsert", dependencies=[Depends(require_key)], response_model=GraphUpsertResp, tags=["graph"])
+def graph_upsert(req: GraphUpsertReq) -> Dict[str, Any]:
+    data = req.data
+    try:
+        driver = _get_neo4j_driver()
+    except RuntimeError as re:
+        raise HTTPException(status_code=503, detail=str(re))
+
+    def _props_json(props: List[KV]) -> str:
+        return json.dumps([{"key": p.key, "value": p.value} for p in (props or [])], ensure_ascii=False)
+
+    n_count = 0
+    e_count = 0
+    try:
+        with driver.session() as session:
+            # upsert nodes
+            for n in data.nodes:
+                session.run(
+                    """
+                    MERGE (x:Entity:`%s` {id: $id})
+                    ON CREATE SET x.created_at = timestamp()
+                    SET x.updated_at = timestamp(), x.type = $type, x.props_json = $props
+                    """
+                    % n.type,
+                    id=n.id,
+                    type=n.type,
+                    props=_props_json(n.props),
+                )
+                n_count += 1
+            # upsert edges
+            for e in data.edges:
+                session.run(
+                    """
+                    MATCH (a {id: $src})
+                    MATCH (b {id: $dst})
+                    MERGE (a)-[r:`%s`]->(b)
+                    ON CREATE SET r.created_at = timestamp()
+                    SET r.updated_at = timestamp(), r.type = $type, r.props_json = $props
+                    """
+                    % e.type,
+                    src=e.src,
+                    dst=e.dst,
+                    type=e.type,
+                    props=_props_json(e.props),
+                )
+                e_count += 1
+        return {"ok": True, "nodes": n_count, "edges": e_count}
+    except Exception as e:
+        logger.exception("/graph/upsert neo4j error")
+        raise HTTPException(status_code=502, detail=f"neo4j_error: {e}")
+
+
+@app.post("/graph/query", dependencies=[Depends(require_key)], response_model=GraphQueryResp, tags=["graph"])
+def graph_query(req: GraphQueryReq) -> Dict[str, Any]:
+    q = (req.query or "").strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="query is required")
+    # 簡單安全守門：拒絕資料修改關鍵字（非萬全，實務應做白名單）
+    lowered = q.lower()
+    forbidden = ["delete ", "remove ", "drop ", "create ", "set ", "merge ", "load ", "call db."]
+    if any(tok in lowered for tok in forbidden):
+        raise HTTPException(status_code=400, detail="write_or_unsafe_query_not_allowed")
+    try:
+        driver = _get_neo4j_driver()
+    except RuntimeError as re:
+        raise HTTPException(status_code=503, detail=str(re))
+    try:
+        with driver.session() as session:
+            rs = session.run(q, **(req.params or {}))
+            records = [r.data() for r in rs]
+        return {"ok": True, "records": records}
+    except Exception as e:
+        logger.exception("/graph/query neo4j error")
+        raise HTTPException(status_code=502, detail=f"neo4j_error: {e}")
 
 
 @app.post(
