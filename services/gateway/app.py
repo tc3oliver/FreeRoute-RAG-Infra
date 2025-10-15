@@ -4,19 +4,13 @@ import os
 
 # === 第三方套件 ===
 # For backward compatibility with tests (re-export commonly used imports)
-from fastapi import (
-    FastAPI,
-    HTTPException,  # noqa: F401
-)
+from fastapi import HTTPException  # noqa: F401
+from fastapi import FastAPI
 
 # --- Local module imports ---
 from .config import APP_VERSION
-from .middleware import (
-    METRICS_ENABLED,  # noqa: F401
-    RequestContextFilter,
-    add_request_id,
-    prometheus_middleware,
-)
+from .middleware import METRICS_ENABLED  # noqa: F401
+from .middleware import RequestContextFilter, add_request_id, prometheus_middleware
 from .models import ChatReq, ChatResp, EmbedReq, EmbedResp, GraphProbeReq, GraphProbeResp, GraphReq  # noqa: F401
 from .repositories import get_litellm_client  # noqa: F401
 from .routers import chat, graph, meta, vector
