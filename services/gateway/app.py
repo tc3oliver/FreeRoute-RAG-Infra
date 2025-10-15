@@ -18,7 +18,10 @@ from jsonschema import Draft202012Validator, validate
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-# 新增：抽離的資料模型與工具函式
+# --- Local module imports (kept at top; no non-import code before this block) ---
+from .deps import API_KEYS, require_key
+from .middleware import METRICS_ENABLED as METRICS_ENABLED
+from .middleware import RequestContextFilter, add_request_id, log_event, prometheus_middleware, request_ctx
 from .models import (
     KV,
     ChatReq,
@@ -56,6 +59,11 @@ from .models import (
     VersionResp,
     WhoAmIResp,
 )
+from .routers.meta import health as health
+from .routers.meta import metrics as metrics
+from .routers.meta import router as meta_router
+from .routers.meta import version as version
+from .routers.meta import whoami as whoami
 from .utils import dedup_merge_nodes as _dedup_merge_nodes
 from .utils import ensure_json_hint as _ensure_json_hint
 from .utils import extract_json_obj as _extract_json_obj
@@ -65,6 +73,8 @@ from .utils import prune_graph as _prune_graph
 from .utils import retry_once_429 as _retry_once_429
 from .utils import sha1 as _sha1
 
+# 新增：抽離的資料模型與工具函式
+
 # === 環境變數與全域參數 ===
 LITELLM_BASE = os.environ.get("LITELLM_BASE", "http://litellm:4000/v1").rstrip("/")
 LITELLM_KEY = os.environ.get("LITELLM_KEY", "sk-admin")
@@ -73,8 +83,6 @@ QDRANT_URL = os.environ.get("QDRANT_URL")  # e.g., http://qdrant:6333
 NEO4J_URI = os.environ.get("NEO4J_URI")  # e.g., bolt://neo4j:7687
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD")
-
-API_KEYS = {k.strip() for k in os.environ.get("API_GATEWAY_KEYS", "dev-key").split(",") if k.strip()}
 
 # 統一路徑：容器內掛載到 /app/schemas/graph_schema.json
 GRAPH_SCHEMA_PATH = os.environ.get("GRAPH_SCHEMA_PATH", "/app/schemas/graph_schema.json")
@@ -132,95 +140,13 @@ if not logger.handlers:
 
 
 # === Middleware ===
-@app.middleware("http")
-async def add_request_id(request: Request, call_next):
-    """Attach X-Request-ID to every request/response for tracing."""
-    rid = request.headers.get("X-Request-ID") or str(uuid.uuid4())
-    request.state.request_id = rid
-    # initialize per-request context
-    token = request_ctx.set(
-        {
-            "request_id": rid,
-            "client_ip": request.client.host if request.client else "-",
-            "start_time": time.time(),
-        }
-    )
-    try:
-        response = await call_next(request)
-    finally:
-        # restore previous context
-        request_ctx.reset(token)
-    response.headers["X-Request-ID"] = rid
-    return response
+app.middleware("http")(add_request_id)
 
 
-# Optional Prometheus metrics (soft dependency). If prometheus-client isn't
-# installed the gateway will still function; metrics will be disabled.
-
-# Prometheus metrics (可選)
-try:
-    from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, Histogram, generate_latest
-
-    METRICS_ENABLED = True
-    _METRICS_REG = CollectorRegistry()
-    REQUEST_COUNTER = Counter(
-        "gateway_requests_total",
-        "Total HTTP requests",
-        ["method", "endpoint", "http_status"],
-        registry=_METRICS_REG,
-    )
-    REQUEST_LATENCY = Histogram(
-        "gateway_request_duration_seconds",
-        "Request latency",
-        ["method", "endpoint"],
-        registry=_METRICS_REG,
-    )
-except Exception:
-    METRICS_ENABLED = False
-
-
-@app.middleware("http")
-async def prometheus_middleware(request: Request, call_next):
-    """Middleware to record Prometheus metrics (if enabled)."""
-    if not METRICS_ENABLED:
-        return await call_next(request)
-    path = request.url.path
-    method = request.method
-    try:
-        with REQUEST_LATENCY.labels(method=method, endpoint=path).time():
-            resp = await call_next(request)
-    except Exception:
-        REQUEST_COUNTER.labels(method=method, endpoint=path, http_status="500").inc()
-        raise
-    status = str(resp.status_code)
-    REQUEST_COUNTER.labels(method=method, endpoint=path, http_status=status).inc()
-    return resp
+app.middleware("http")(prometheus_middleware)
 
 
 # === 請求上下文與日誌 ===
-request_ctx: ContextVar[Dict[str, Any]] = ContextVar("request_ctx", default={})
-
-
-class RequestContextFilter(logging.Filter):
-    """Attach current request context fields to LogRecord.
-    The filter adds: request_id, client_ip, duration_ms, and event (if present).
-    """
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        ctx = request_ctx.get({})
-        record.request_id = ctx.get("request_id", "-")
-        record.client_ip = ctx.get("client_ip", "-")
-        start = ctx.get("start_time")
-        if start:
-            record.duration_ms = int((time.time() - start) * 1000)
-        else:
-            record.duration_ms = 0
-        if not hasattr(record, "event"):
-            record.event = getattr(record, "event", "-")
-        return True
-
-
-# attach filter to gateway logger handlers (if any) so records include context
 try:
     f = RequestContextFilter()
     logger.addFilter(f)
@@ -237,24 +163,7 @@ except Exception:
     pass
 
 
-def log_event(msg: str, event: str, level: int = logging.INFO, **meta: Any) -> None:
-    """Convenience helper to log with an `event` and optional structured metadata.
-    Usage: log_event("starting extraction", "graph.extract.start", provider=provider)
-    """
-    extra = {"event": event}
-    extra.update(meta)
-    logger.log(level, msg, extra=extra)
-
-
-def require_key(x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)) -> bool:
-    token = None
-    if x_api_key:
-        token = x_api_key.strip()
-    elif authorization and authorization.lower().startswith("bearer "):
-        token = authorization[7:].strip()
-    if not token or token not in API_KEYS:
-        raise HTTPException(status_code=401, detail="missing or invalid API key")
-    return True
+## require_key 已移至 services.gateway.deps 並於頂部匯入
 
 
 # === 請求/回應資料模型 ===
@@ -344,50 +253,8 @@ def _get_neo4j_driver():
 
 
 # === API 路由 ===
-@app.get("/health", response_model=HealthResp, tags=["meta"])
-def health() -> Dict[str, Any]:
-    return {"ok": True}
-
-
-@app.get("/whoami", dependencies=[Depends(require_key)], response_model=WhoAmIResp, tags=["meta"])
-def whoami() -> Dict[str, Any]:
-    return {
-        "app_version": APP_VERSION,
-        "litellm_base": LITELLM_BASE,
-        "entrypoints": sorted(list(ENTRYPOINTS)),
-        "json_mode_hint_injection": True,
-        "graph_schema_path": GRAPH_SCHEMA_PATH,
-        "schema_hash": GRAPH_SCHEMA_HASH,
-        "graph_defaults": {
-            "min_nodes": GRAPH_MIN_NODES,
-            "min_edges": GRAPH_MIN_EDGES,
-            "allow_empty": GRAPH_ALLOW_EMPTY,
-            "max_attempts": GRAPH_MAX_ATTEMPTS,
-            "provider_chain": PROVIDER_CHAIN,
-        },
-    }
-
-
-@app.get("/version", response_model=VersionResp, tags=["meta"])
-def version() -> Dict[str, str]:
-    return {"version": APP_VERSION}
-
-
-@app.get("/metrics", tags=["meta"])
-def metrics() -> Response:
-    """Expose Prometheus metrics if prometheus-client is installed.
-
-    Returns an empty 204 response when metrics are disabled so the endpoint
-    can be probed safely in environments without the optional dependency.
-    """
-    if not METRICS_ENABLED:
-        return Response(status_code=204)
-    try:
-        data = generate_latest(_METRICS_REG)
-    except Exception:
-        # fallback to default collector if registry call fails
-        data = generate_latest()
-    return PlainTextResponse(content=data, media_type=CONTENT_TYPE_LATEST)
+app.include_router(meta_router)
+## metrics/health/version/whoami 已移至 routers.meta 並在頂部 re-export
 
 
 # ========== 新增：Index/Vector 檢索 API ==========
