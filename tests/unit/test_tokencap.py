@@ -1,10 +1,18 @@
 import asyncio
+import json
 import os
+import sys
+from io import StringIO
 from types import SimpleNamespace
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
-from integrations.litellm.plugins import token_cap
+# Mock the schema file before importing token_cap
+_fake_schema = json.dumps({"type": "object", "properties": {"nodes": {}, "edges": {}}, "required": ["nodes", "edges"]})
+
+with patch("os.path.exists", return_value=True), patch("builtins.open", mock_open(read_data=_fake_schema)):
+    from integrations.litellm.plugins import token_cap
 
 
 def test_is_openai_model_name_and_entrypoint():
