@@ -14,7 +14,7 @@ services:
       <<: *common-env
     volumes:
       - qdrant_data:/qdrant/storage
-    ports: ["6333:6333"]
+    ports: ["9333:6333"]
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ services:
       - neo4j_logs:/logs
       - neo4j_import:/import
       - neo4j_plugins:/plugins
-    ports: ["7474:7474", "7687:7687"]
+    ports: ["9474:7474", "9687:7687"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:7474/ || exit 1"]
       interval: 10s
@@ -51,7 +51,7 @@ services:
     command: ["redis-server","--save","","--appendonly","no"]
     environment:
       <<: *common-env
-    ports: ["6379:6379"]
+    ports: ["9379:6379"]
     healthcheck:        # NEW: 簡易探活
       test: ["CMD","redis-cli","ping"]
       interval: 5s
@@ -258,6 +258,8 @@ services:
     ports: ["9800:8000"]
     volumes:
       - ./schemas/graph_schema.json:/app/schemas/graph_schema.json:ro
+      # 選配：開發時同步 gateway 原始碼，減少重建
+      # - ./services/gateway:/app/services/gateway:ro
     healthcheck:
       test: ["CMD-SHELL", "python - <<'PY'\nimport urllib.request,sys\nu='http://localhost:8000/health'\ntry:\n  urllib.request.urlopen(u, timeout=3)\n  sys.exit(0)\nexcept Exception:\n  sys.exit(1)\nPY"]
       interval: 5s
