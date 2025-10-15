@@ -154,7 +154,7 @@ class VectorService:
         return {
             "ok": True,
             "hits": vector_hits,
-            "subgraph": subgraph_data.dict() if subgraph_data else None,
+            "subgraph": subgraph_data.model_dump() if subgraph_data else None,
             "query_time_ms": query_time,
         }
 
