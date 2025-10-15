@@ -233,9 +233,9 @@ class RetrieveResp(BaseModel):
     query_time_ms: int
 
 
-# Resolve forward refs
-GraphData.update_forward_refs()
-GraphNode.update_forward_refs()
-GraphEdge.update_forward_refs()
-GraphExtractResp.update_forward_refs()
-GraphUpsertReq.update_forward_refs()
+# Resolve forward refs (Pydantic V2 compatible)
+GraphData.model_rebuild()
+GraphNode.model_rebuild()
+GraphEdge.model_rebuild()
+GraphExtractResp.model_rebuild()
+GraphUpsertReq.model_rebuild()
