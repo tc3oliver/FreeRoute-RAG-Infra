@@ -1,10 +1,16 @@
 import asyncio
 import os
+import sys
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
-from integrations.litellm.plugins import token_cap
+with patch(
+    "integrations.litellm.plugins.token_cap._load_graph_schema",
+    return_value={"type": "object", "properties": {"nodes": {}, "edges": {}}, "required": ["nodes", "edges"]},
+):
+    from integrations.litellm.plugins import token_cap
 
 
 def test_is_openai_model_name_and_entrypoint():
