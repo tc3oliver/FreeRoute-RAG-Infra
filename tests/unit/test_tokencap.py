@@ -1,15 +1,17 @@
 import asyncio
+import json
 import os
 import sys
+from io import StringIO
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
-with patch(
-    "integrations.litellm.plugins.token_cap._load_graph_schema",
-    return_value={"type": "object", "properties": {"nodes": {}, "edges": {}}, "required": ["nodes", "edges"]},
-):
+# Mock the schema file before importing token_cap
+_fake_schema = json.dumps({"type": "object", "properties": {"nodes": {}, "edges": {}}, "required": ["nodes", "edges"]})
+
+with patch("os.path.exists", return_value=True), patch("builtins.open", mock_open(read_data=_fake_schema)):
     from integrations.litellm.plugins import token_cap
 
 
