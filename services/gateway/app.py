@@ -18,6 +18,53 @@ from jsonschema import Draft202012Validator, validate
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
+# 新增：抽離的資料模型與工具函式
+from .models import (
+    KV,
+    ChatReq,
+    ChatResp,
+    ChunkItem,
+    Citation,
+    EmbedReq,
+    EmbedResp,
+    GraphData,
+    GraphEdge,
+    GraphExtractResp,
+    GraphNode,
+    GraphProbeReq,
+    GraphProbeResp,
+    GraphQueryReq,
+    GraphQueryResp,
+    GraphReq,
+    GraphUpsertReq,
+    GraphUpsertResp,
+    HealthResp,
+    IndexChunksReq,
+    IndexChunksResp,
+    RerankItem,
+    RerankReq,
+    RerankResp,
+    RetrieveHit,
+    RetrieveReq,
+    RetrieveResp,
+    SearchHit,
+    SearchReq,
+    SearchResp,
+    Subgraph,
+    SubgraphEdge,
+    SubgraphNode,
+    VersionResp,
+    WhoAmIResp,
+)
+from .utils import dedup_merge_nodes as _dedup_merge_nodes
+from .utils import ensure_json_hint as _ensure_json_hint
+from .utils import extract_json_obj as _extract_json_obj
+from .utils import kvize as _kvize
+from .utils import normalize_graph_shape as _normalize_graph_shape
+from .utils import prune_graph as _prune_graph
+from .utils import retry_once_429 as _retry_once_429
+from .utils import sha1 as _sha1
+
 # === 環境變數與全域參數 ===
 LITELLM_BASE = os.environ.get("LITELLM_BASE", "http://litellm:4000/v1").rstrip("/")
 LITELLM_KEY = os.environ.get("LITELLM_KEY", "sk-admin")
@@ -211,234 +258,25 @@ def require_key(x_api_key: Optional[str] = Header(None), authorization: Optional
 
 
 # === 請求/回應資料模型 ===
-class ChatReq(BaseModel):
-    messages: List[Dict[str, str]] = Field(..., description="OpenAI chat messages")
-    model: Optional[str] = Field(None, description="建議留空或使用入口名")
-    temperature: float = 0.2
-    json_mode: bool = False
-
-
-class EmbedReq(BaseModel):
-    texts: List[str]
+## 已移至 services.gateway.models
 
 
 # ---------- Response Models (keep existing fields; purely descriptive) ----------
 
 
-class HealthResp(BaseModel):
-    ok: bool
-
-
-class VersionResp(BaseModel):
-    version: str
-
-
-class WhoAmIResp(BaseModel):
-    app_version: str
-    litellm_base: str
-    entrypoints: List[str]
-    json_mode_hint_injection: bool
-    graph_schema_path: str
-    schema_hash: str
-    graph_defaults: Dict[str, Any]
-
-
-class EmbedResp(BaseModel):
-    ok: bool
-    vectors: List[List[float]]
-    dim: int
-
-
-class RerankItem(BaseModel):
-    index: int
-    score: float
-    text: Optional[str] = None
-
-
-class RerankResp(BaseModel):
-    ok: bool
-    results: List[RerankItem]
-
-
-class ChatResp(BaseModel):
-    ok: bool
-    data: Any
-    meta: Dict[str, Any]
-
-
-class KV(BaseModel):
-    key: str
-    value: Any
-
-
-class GraphNode(BaseModel):
-    id: str
-    type: str
-    props: List[KV]
-
-
-class GraphEdge(BaseModel):
-    src: str
-    dst: str
-    type: str
-    props: List[KV]
-
-
-class GraphData(BaseModel):
-    nodes: List[GraphNode]
-    edges: List[GraphEdge]
-
-
-class GraphExtractResp(BaseModel):
-    ok: bool
-    data: GraphData
-    provider: str
-    schema_hash: str
-
-
-class GraphProbeResp(BaseModel):
-    ok: bool
-    mode: str
-    provider: Optional[str] = None
-    data: Optional[Dict[str, Any]] = None
-    text: Optional[str] = None
-    error: Optional[str] = None
-    raw: Optional[str] = None
-
-
-class RerankReq(BaseModel):
-    query: str
-    documents: List[str]
-    top_n: int = 6
-
-
-class GraphReq(BaseModel):
-    context: str
-    strict: bool = True
-    repair_if_invalid: bool = True
-    min_nodes: Optional[int] = None
-    min_edges: Optional[int] = None
-    allow_empty: Optional[bool] = None
-    max_attempts: Optional[int] = None
-    provider_chain: Optional[List[str]] = None
-
-
-class GraphProbeReq(BaseModel):
-    model: str = Field(..., description="入口名或真實供應商名；建議用入口名 e.g. graph-extractor")
-    strict_json: bool = False
-    temperature: float = 0.0
-    timeout: int = 60
-    messages: Optional[List[Dict[str, str]]] = None
+## 已移至 services.gateway.models
 
 
 # ========== Index/Search (Vector) 請求/回應模型 ==========
-class ChunkItem(BaseModel):
-    doc_id: str
-    text: str
-    chunk_id: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
-
-
-class IndexChunksReq(BaseModel):
-    chunks: List[ChunkItem]
-    collection: str = Field(default="chunks", description="Qdrant collection name")
-
-
-class IndexChunksResp(BaseModel):
-    ok: bool
-    upserted: int
-    dim: int
-    collection: str
-
-
-class SearchReq(BaseModel):
-    query: str
-    top_k: int = 5
-    collection: str = "chunks"
-    filters: Optional[Dict[str, Any]] = None
-
-
-class SearchHit(BaseModel):
-    id: Any
-    score: float
-    payload: Dict[str, Any]
-
-
-class SearchResp(BaseModel):
-    ok: bool
-    hits: List[SearchHit]
+## 已移至 services.gateway.models
 
 
 # ========== Graph Upsert/Query 請求/回應模型 ==========
-class GraphUpsertReq(BaseModel):
-    data: GraphData
-
-
-class GraphUpsertResp(BaseModel):
-    ok: bool
-    nodes: int
-    edges: int
-
-
-class GraphQueryReq(BaseModel):
-    query: str
-    params: Optional[Dict[str, Any]] = None
-
-
-class GraphQueryResp(BaseModel):
-    ok: bool
-    records: List[Dict[str, Any]]
+## 已移至 services.gateway.models
 
 
 # ========== Hybrid Retrieval 請求/回應模型 ==========
-class RetrieveReq(BaseModel):
-    query: str
-    top_k: int = 5
-    collection: str = "chunks"
-    include_subgraph: bool = True
-    max_hops: int = 1
-    filters: Optional[Dict[str, Any]] = None
-
-
-class Citation(BaseModel):
-    source: str  # "vector" | "graph" | "hybrid"
-    doc_id: Optional[str] = None
-    chunk_id: Optional[str] = None
-    node_id: Optional[str] = None
-    edge_type: Optional[str] = None
-    score: Optional[float] = None
-
-
-class RetrieveHit(BaseModel):
-    text: str
-    metadata: Dict[str, Any]
-    citations: List[Citation]
-    score: Optional[float] = None
-
-
-class SubgraphNode(BaseModel):
-    id: str
-    type: str
-    props: Dict[str, Any]
-
-
-class SubgraphEdge(BaseModel):
-    src: str
-    dst: str
-    type: str
-    props: Dict[str, Any]
-
-
-class Subgraph(BaseModel):
-    nodes: List[SubgraphNode]
-    edges: List[SubgraphEdge]
-
-
-class RetrieveResp(BaseModel):
-    ok: bool
-    hits: List[RetrieveHit]
-    subgraph: Optional[Subgraph] = None
-    query_time_ms: int
+## 已移至 services.gateway.models
 
 
 ENTRYPOINTS = {"rag-answer", "graph-extractor"}
@@ -450,137 +288,6 @@ def _normalize_model(model: Optional[str], kind: str = "chat") -> str:
         return DEFAULTS[kind]
     m = model.strip()
     return m if m in ENTRYPOINTS else DEFAULTS[kind]
-
-
-def _retry_once_429(func, *args, **kwargs):
-    try:
-        return func(*args, **kwargs)
-    except Exception as e:
-        if "429" in str(e):
-            time.sleep(0.3)
-            return func(*args, **kwargs)
-        raise
-
-
-def _ensure_json_hint(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    def _has_json_word(msgs):
-        for m in msgs:
-            if isinstance(m, dict):
-                c = m.get("content") or ""
-                if isinstance(c, str) and ("json" in c.lower()):
-                    return True
-        return False
-
-    if _has_json_word(messages):
-        return messages
-    hint = {"role": "system", "content": "請以 JSON 物件回覆（JSON only）。"}
-    return [hint] + messages
-
-
-def _extract_json_obj(text: str) -> Dict[str, Any]:
-    t = (text or "").strip()
-    if t.startswith("```"):
-        t = t.replace("```json", "").replace("```JSON", "").replace("```", "").strip()
-    start = t.find("{")
-    end = t.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        raise ValueError("no_json_object_found")
-    snippet = t[start : end + 1]
-    try:
-        return json.loads(snippet)
-    except Exception:
-        brace = 0
-        for i, ch in enumerate(t[start:]):
-            if ch == "{":
-                brace += 1
-            elif ch == "}":
-                brace -= 1
-                if brace == 0:
-                    return json.loads(t[start : start + i + 1])
-        raise ValueError("invalid_json_payload")
-
-
-def _kvize(obj: Any) -> List[Dict[str, Any]]:
-    if obj is None:
-        return []
-    if isinstance(obj, dict):
-        out = []
-        for k, v in obj.items():
-            out.append({"key": str(k), "value": v})
-        return out
-    if isinstance(obj, list):
-        good = []
-        for it in obj:
-            if isinstance(it, dict) and "key" in it and "value" in it:
-                good.append({"key": str(it["key"]), "value": it["value"]})
-        return good
-    return []
-
-
-def _sha1(text: str) -> str:
-    return hashlib.sha1(text.encode("utf-8")).hexdigest()
-
-
-def _dedup_merge_nodes(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    by_id = {}
-    for n in nodes:
-        k = n["id"]
-        if k in by_id:
-            seen = {(p["key"], json.dumps(p["value"], ensure_ascii=False)) for p in by_id[k]["props"]}
-            for p in n["props"]:
-                sig = (p["key"], json.dumps(p["value"], ensure_ascii=False))
-                if sig not in seen:
-                    by_id[k]["props"].append(p)
-                    seen.add(sig)
-        else:
-            by_id[k] = n
-    return list(by_id.values())
-
-
-def _normalize_graph_shape(data: Any) -> Dict[str, Any]:
-    nodes, edges = [], []
-
-    if isinstance(data, list):
-        raw_nodes = data
-        raw_edges = []
-    elif isinstance(data, dict):
-        raw_nodes = data.get("nodes", [])
-        raw_edges = data.get("edges", [])
-        if not raw_nodes and isinstance(data.get("items"), list):
-            raw_nodes = data["items"]
-    else:
-        raw_nodes, raw_edges = [], []
-
-    if isinstance(raw_nodes, list):
-        for n in raw_nodes:
-            if not isinstance(n, dict):
-                continue
-            nid = n.get("id") or n.get("name") or n.get("node_id") or ""
-            ntype = (
-                n.get("type")
-                or n.get("label")
-                or (n.get("labels")[0] if isinstance(n.get("labels"), list) and n.get("labels") else None)
-                or "Entity"
-            )
-            props = _kvize(n.get("props"))
-            if n.get("name") and not any(p.get("key") == "name" for p in props):
-                props.append({"key": "name", "value": n["name"]})
-            if isinstance(nid, str) and isinstance(ntype, str) and nid:
-                nodes.append({"id": nid, "type": ntype, "props": props})
-
-    if isinstance(raw_edges, list):
-        for e in raw_edges:
-            if not isinstance(e, dict):
-                continue
-            src = e.get("src") or e.get("source") or e.get("from") or ""
-            dst = e.get("dst") or e.get("target") or e.get("to") or ""
-            etype = e.get("type") or e.get("label") or "RELATED_TO"
-            props = _kvize(e.get("props"))
-            if all(isinstance(x, str) and x for x in (src, dst, etype)):
-                edges.append({"src": src, "dst": dst, "type": etype, "props": props})
-
-    nodes = _dedup_merge_nodes(nodes)
-    return {"nodes": nodes, "edges": edges}
 
 
 def _is_single_error_node(d: Dict[str, Any]) -> bool:
@@ -597,26 +304,7 @@ def _is_single_error_node(d: Dict[str, Any]) -> bool:
         return False
 
 
-def _prune_graph(data: Dict[str, Any]) -> Dict[str, Any]:
-    for n in data.get("nodes", []):
-        n["props"] = [
-            p
-            for p in n.get("props", [])
-            if isinstance(p.get("key"), str)
-            and str(p["key"]).strip()
-            and p.get("value") is not None
-            and (not isinstance(p["value"], str) or p["value"].strip())
-        ]
-    for e in data.get("edges", []):
-        e["props"] = [
-            p
-            for p in e.get("props", [])
-            if isinstance(p.get("key"), str)
-            and str(p["key"]).strip()
-            and p.get("value") is not None
-            and (not isinstance(p["value"], str) or p["value"].strip())
-        ]
-    return data
+## 已移至 services.gateway.utils（以 _prune_graph 名稱 import）
 
 
 # ========== 可選整合：Qdrant（lazy import） ==========
