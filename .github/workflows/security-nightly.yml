@@ -22,11 +22,17 @@ jobs:
         run: |
           semgrep --config=p/ci --output=semgrep.sarif --sarif || true
 
-      - name: Build gateway image and scan with trivy
+      - name: Build gateway image
         run: |
           docker build -t free-rag-gateway:ci -f containers/gateway/Dockerfile .
-          python -m pip install trivy
-          trivy image --format json -o trivy.json free-rag-gateway:ci || true
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'free-rag-gateway:ci'
+          format: 'json'
+          output: 'trivy.json'
+          exit-code: '0'
 
       - name: Upload reports
         uses: actions/upload-artifact@v4
