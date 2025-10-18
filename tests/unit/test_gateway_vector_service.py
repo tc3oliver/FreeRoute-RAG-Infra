@@ -153,3 +153,35 @@ def test_retrieve_no_vector_results(monkeypatch):
     assert result["ok"] is True
     assert result["hits"] == []
     assert result["subgraph"] is None
+
+
+def test_search_empty_query():
+    """Test that empty query raises ValueError."""
+    svc = vector_service_mod.VectorService()
+    req = SearchReq(collection="testcol", query="", top_k=5)
+    with pytest.raises(ValueError, match="query must be non-empty"):
+        svc.search(req)
+
+
+def test_search_whitespace_query():
+    """Test that whitespace-only query raises ValueError."""
+    svc = vector_service_mod.VectorService()
+    req = SearchReq(collection="testcol", query="   ", top_k=5)
+    with pytest.raises(ValueError, match="query must be non-empty"):
+        svc.search(req)
+
+
+def test_retrieve_empty_query():
+    """Test that empty query raises ValueError."""
+    svc = vector_service_mod.VectorService()
+    req = RetrieveReq(collection="testcol", query="", top_k=5)
+    with pytest.raises(ValueError, match="query must be non-empty"):
+        svc.retrieve(req)
+
+
+def test_retrieve_whitespace_query():
+    """Test that whitespace-only query raises ValueError."""
+    svc = vector_service_mod.VectorService()
+    req = RetrieveReq(collection="testcol", query="  \n\t  ", top_k=5)
+    with pytest.raises(ValueError, match="query must be non-empty"):
+        svc.retrieve(req)
