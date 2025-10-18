@@ -39,6 +39,8 @@ def search(req: SearchReq, service: VectorService = Depends(get_vector_service))
     """Vector similarity search."""
     try:
         return service.search(req)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except RuntimeError as re:
         raise HTTPException(status_code=503, detail=str(re))
     except Exception as e:
@@ -53,6 +55,8 @@ def retrieve(req: RetrieveReq, service: VectorService = Depends(get_vector_servi
     """Hybrid retrieval: vector search + graph neighborhood expansion."""
     try:
         return service.retrieve(req)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         import logging
 

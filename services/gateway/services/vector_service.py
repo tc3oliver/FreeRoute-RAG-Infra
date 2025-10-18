@@ -78,6 +78,10 @@ class VectorService:
         Returns:
             Dict with 'ok' and 'hits' keys
         """
+        # Validate query
+        if not req.query or not req.query.strip():
+            raise ValueError("query must be non-empty")
+
         # Generate query embedding
         emb = self.client.embeddings.create(model="local-embed", input=[req.query])
         qvec = emb.data[0].embedding
@@ -111,6 +115,10 @@ class VectorService:
         Returns:
             Dict with 'ok', 'hits', 'subgraph', and 'query_time_ms' keys
         """
+        # Validate query
+        if not req.query or not req.query.strip():
+            raise ValueError("query must be non-empty")
+
         start_time = time.time()
 
         # 1) Vector search
