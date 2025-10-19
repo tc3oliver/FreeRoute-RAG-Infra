@@ -2,15 +2,13 @@
 
 > **更新時間**: 2025-10-19 (最新更新)
 > **分支**: `feature/async-architecture-refactor`
-> **狀態**: Phase 4 完成 (86% 完成)
+> **狀態**: Phase 5 完成 (93% 完成) - 僅剩性能測試
 
 ## 📊 總體進度
 
 ```
-████████████████████████░░░░ 86% (12/14 任務完成)
+███████████████████████████░ 93% (13/14 任務完成)
 ```
-
-### ✅ 已完成 (12 項)
 
 #### Phase 1 & 2: 基礎設施和客戶端層 (100% 完成)
 - [x] **任務 1-2**: 代碼審查和分析 ✅
@@ -55,11 +53,19 @@
   - `require_key()` 保持同步（無 I/O 操作）
   - 所有路由器測試更新為 async with `@pytest.mark.asyncio`
 
-### 📋 待辦 (2 項)
+### ✅ 已完成 (13 項)
 
-- [ ] **任務 13**: 更新單元測試為異步 (部分完成)
+#### Phase 5: 測試完善 (100% 完成) ✅
+- [x] **任務 13**: 更新單元測試為異步 ✅
   - ✅ 路由器測試已完成 (test_gateway_routers.py)
-  - 🔄 服務層測試需要添加 (AsyncChatService, AsyncVectorService, AsyncGraphService)
+  - ✅ 服務層測試已完成 (test_gateway_async_services.py)
+  - AsyncChatService: 5 tests (all passing)
+  - AsyncVectorService: 3 tests (2 skipped due to qdrant_client, 1 passing)
+  - AsyncGraphService: 4 tests (all passing)
+  - **測試結果**: 10 passed, 2 skipped in 0.55s
+  - **提交**: `a5416ef` - test: Add comprehensive async service tests with fixes
+
+### 📋 待辦 (1 項)
 
 - [ ] **任務 14**: 性能測試和基準測試
   - 創建性能測試腳本
@@ -142,6 +148,7 @@ Total: 5-10 seconds (50-70% faster!) 🚀
 - docs/async-refactor-progress.md (進度追蹤文檔)
 - services/gateway/services/async_vector_service.py (AsyncVectorService)
 - services/gateway/services/async_graph_service.py (AsyncGraphService)
+- tests/unit/test_gateway_async_services.py (異步服務測試套件, 12 tests)
 
 修改文件:
 - services/gateway/requirements.txt (+2 依賴: aiofiles, pytest-asyncio)
@@ -150,6 +157,7 @@ Total: 5-10 seconds (50-70% faster!) 🚀
 - services/gateway/repositories/neo4j_client.py (AsyncGraphDatabase)
 - services/gateway/repositories/reranker_client.py (httpx.AsyncClient)
 - services/gateway/services/chat_service.py (添加 AsyncChatService)
+- services/gateway/services/async_graph_service.py (修復 query 方法變量作用域)
 - services/gateway/utils.py (添加 retry_once_429_async)
 - services/gateway/routers/chat.py (async endpoints)
 - services/gateway/routers/vector.py (async endpoints)
@@ -157,15 +165,17 @@ Total: 5-10 seconds (50-70% faster!) 🚀
 - tests/unit/test_gateway_routers.py (async tests with pytest-asyncio)
 
 總計:
-- 新增: ~1500 行代碼
-- 修改: ~400 行代碼
+- 新增: ~2000 行代碼 (+500 行測試)
+- 修改: ~420 行代碼
 - 刪除: 0 行 (保持向後兼容)
-- Commits: 6 個提交
+- 修復 Bug: 1 個 (AsyncGraphService.query 變量作用域)
+- Commits: 7 個提交
 ```
 
-## � Git 提交歷史
+## 🚧 Git 提交歷史
 
 ```bash
+a5416ef test: Add comprehensive async service tests with fixes
 a498c20 feat(async): Phase 4 - Update routers to async and fix tests
 39fb9eb feat(async): Phase 3.3 - Add AsyncGraphService with parallel provider attempts
 d3df73d docs: Add async refactor progress report
@@ -178,12 +188,13 @@ d3df73d docs: Add async refactor progress report
 
 ### 短期 (本週)
 
-1. **更新服務層測試** (2-3 小時)
-   - 為 AsyncChatService, AsyncVectorService, AsyncGraphService 添加測試
-   - 使用 pytest-asyncio 和 mock async 函數
-   - 驗證並行執行邏輯
+1. ✅ ~~**更新服務層測試**~~ (已完成)
+   - ✅ 為 AsyncChatService, AsyncVectorService, AsyncGraphService 添加測試
+   - ✅ 使用 pytest-asyncio 和 AsyncMock
+   - ✅ 驗證並行執行邏輯
+   - ✅ 修復 AsyncGraphService.query() 變量作用域 bug
 
-2. **性能基準測試** (2-3 小時)
+2. **性能基準測試** (2-3 小時) - 最後一項任務！
    - 創建性能測試腳本
    - 對比同步/異步性能
    - 驗證 3-5x 吞吐量提升
