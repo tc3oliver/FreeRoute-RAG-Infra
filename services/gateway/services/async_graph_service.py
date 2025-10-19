@@ -434,6 +434,7 @@ class AsyncGraphService:
 
         await self._ensure_clients()
 
+        records = []
         async with self.neo4j_driver.session() as session:
             result = await session.run(q, **(req.params or {}))
             records = [record.data() async for record in result]
