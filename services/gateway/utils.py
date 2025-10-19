@@ -1,17 +1,40 @@
+import asyncio
 import hashlib
 import json
 import os
 import time
-from typing import Any, Dict, List
+from typing import Any, Awaitable, Callable, Dict, List, TypeVar
+
+T = TypeVar("T")
 
 
 def retry_once_429(func, *args, **kwargs):
+    """
+    Retry a function once if it fails with a 429 error (synchronous).
+
+    DEPRECATED: Use retry_once_429_async() for async operations.
+    """
     try:
         return func(*args, **kwargs)
     except Exception as e:
         if "429" in str(e):
             time.sleep(0.3)
             return func(*args, **kwargs)
+        raise
+
+
+async def retry_once_429_async(func: Callable[..., Awaitable[T]], *args, **kwargs) -> T:
+    """
+    Retry an async function once if it fails with a 429 error.
+
+    This is the preferred function for all async code.
+    """
+    try:
+        return await func(*args, **kwargs)
+    except Exception as e:
+        if "429" in str(e):
+            await asyncio.sleep(0.3)
+            return await func(*args, **kwargs)
         raise
 
 
