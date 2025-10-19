@@ -285,7 +285,7 @@ class TestAppConfiguration:
         from services.gateway import config
 
         importlib.reload(config)
-        assert config.APP_VERSION == "v0.1.2"
+        assert config.APP_VERSION == "v0.2.0"
 
     def test_app_version_custom(self, monkeypatch, tmp_path):
         schema_path = tmp_path / "schema.json"

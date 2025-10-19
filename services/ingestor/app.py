@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 # === 環境變數 ===
 GATEWAY_BASE = os.environ.get("GATEWAY_BASE", "http://apigw:8000").rstrip("/")
 GATEWAY_API_KEY = os.environ.get("GATEWAY_API_KEY", "dev-key")
-APP_VERSION = os.environ.get("APP_VERSION", "v0.1.2")
+APP_VERSION = os.environ.get("APP_VERSION", "v0.2.0")
 
 # 切分參數
 DEFAULT_CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "1000"))
