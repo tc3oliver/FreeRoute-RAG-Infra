@@ -15,6 +15,7 @@ Usage:
 """
 
 import asyncio
+import os
 import statistics
 import time
 from typing import Any, Dict, List
@@ -63,11 +64,11 @@ class PerformanceResults:
 
     def start(self):
         """Start timing."""
-        self.start_time = time.time()
+        self.start_time = time.perf_counter()
 
     def stop(self):
         """Stop timing."""
-        self.end_time = time.time()
+        self.end_time = time.perf_counter()
 
     def add_latency(self, latency: float):
         """Add a latency measurement (in milliseconds)."""
@@ -202,6 +203,7 @@ class MockAsyncVectorService:
 
 @pytest.mark.asyncio
 @pytest.mark.benchmark
+@pytest.mark.skipif(os.environ.get("ENABLE_PERF_BENCH", "0") != "1", reason="Perf benchmarks disabled by default")
 class TestChatServiceBenchmarks:
     """Benchmarks for AsyncChatService."""
 
@@ -220,8 +222,10 @@ class TestChatServiceBenchmarks:
         print("BENCHMARK: Chat Throughput")
         print("=" * 60)
 
+        # 加入簡單的 cache-buster 避免上游快取影響（雖然目前使用 mock）
+        nonce = time.perf_counter()
         req = ChatReq(
-            messages=[{"role": "user", "content": "Hello"}],
+            messages=[{"role": "user", "content": f"Hello {nonce}"}],
             model="gpt-3.5-turbo",
         )
 
@@ -236,9 +240,9 @@ class TestChatServiceBenchmarks:
         results.start()
 
         for _ in range(BENCHMARK_REQUESTS):
-            req_start = time.time()
+            req_start = time.perf_counter()
             await chat_service.chat(req, "127.0.0.1")
-            latency = (time.time() - req_start) * 1000
+            latency = (time.perf_counter() - req_start) * 1000
             results.add_latency(latency)
 
         results.stop()
@@ -258,8 +262,9 @@ class TestChatServiceBenchmarks:
         print("BENCHMARK: Chat Concurrent Requests")
         print("=" * 60)
 
+        nonce = time.perf_counter()
         req = ChatReq(
-            messages=[{"role": "user", "content": "Hello"}],
+            messages=[{"role": "user", "content": f"Hello {nonce}"}],
             model="gpt-3.5-turbo",
         )
 
@@ -270,9 +275,9 @@ class TestChatServiceBenchmarks:
             results.start()
 
             async def make_request():
-                req_start = time.time()
+                req_start = time.perf_counter()
                 await chat_service.chat(req, "127.0.0.1")
-                return (time.time() - req_start) * 1000
+                return (time.perf_counter() - req_start) * 1000
 
             # Run concurrent requests
             tasks = [make_request() for _ in range(concurrency)]
@@ -306,9 +311,9 @@ class TestChatServiceBenchmarks:
         results.start()
 
         for _ in range(BENCHMARK_REQUESTS):
-            req_start = time.time()
+            req_start = time.perf_counter()
             await chat_service.embed(req)
-            latency = (time.time() - req_start) * 1000
+            latency = (time.perf_counter() - req_start) * 1000
             results.add_latency(latency)
 
         results.stop()
@@ -321,6 +326,7 @@ class TestChatServiceBenchmarks:
 
 @pytest.mark.asyncio
 @pytest.mark.benchmark
+@pytest.mark.skipif(os.environ.get("ENABLE_PERF_BENCH", "0") != "1", reason="Perf benchmarks disabled by default")
 class TestVectorServiceBenchmarks:
     """Benchmarks for AsyncVectorService."""
 
@@ -339,7 +345,8 @@ class TestVectorServiceBenchmarks:
         print("BENCHMARK: Vector Search Throughput")
         print("=" * 60)
 
-        req = SearchReq(query="test query", top_k=5)
+        # cache-buster
+        req = SearchReq(query=f"test query {time.perf_counter()}", top_k=5)
 
         # Benchmark
         print(f"Running {BENCHMARK_REQUESTS} requests...")
@@ -347,9 +354,9 @@ class TestVectorServiceBenchmarks:
         results.start()
 
         for _ in range(BENCHMARK_REQUESTS):
-            req_start = time.time()
+            req_start = time.perf_counter()
             await vector_service.search(req)
-            latency = (time.time() - req_start) * 1000
+            latency = (time.perf_counter() - req_start) * 1000
             results.add_latency(latency)
 
         results.stop()
@@ -369,7 +376,7 @@ class TestVectorServiceBenchmarks:
         print("BENCHMARK: Hybrid Retrieval (Parallel vs Serial)")
         print("=" * 60)
 
-        req = SearchReq(query="test query", top_k=5)
+        req = SearchReq(query=f"test query {time.perf_counter()}", top_k=5)
 
         # Test parallel execution (actual implementation)
         print("\nTesting parallel retrieval...")
@@ -377,9 +384,9 @@ class TestVectorServiceBenchmarks:
         results_parallel.start()
 
         for _ in range(20):
-            req_start = time.time()
+            req_start = time.perf_counter()
             await vector_service.retrieve(req)
-            latency = (time.time() - req_start) * 1000
+            latency = (time.perf_counter() - req_start) * 1000
             results_parallel.add_latency(latency)
 
         results_parallel.stop()
@@ -391,11 +398,11 @@ class TestVectorServiceBenchmarks:
         results_serial.start()
 
         for _ in range(20):
-            req_start = time.time()
+            req_start = time.perf_counter()
             # Simulate serial: vector search then graph expansion
             await asyncio.sleep(0.05)  # Vector search
             await asyncio.sleep(0.08)  # Graph expansion
-            latency = (time.time() - req_start) * 1000
+            latency = (time.perf_counter() - req_start) * 1000
             results_serial.add_latency(latency)
 
         results_serial.stop()
@@ -417,6 +424,7 @@ class TestVectorServiceBenchmarks:
 
 @pytest.mark.asyncio
 @pytest.mark.benchmark
+@pytest.mark.skipif(os.environ.get("ENABLE_PERF_BENCH", "0") != "1", reason="Perf benchmarks disabled by default")
 class TestConcurrencyScaling:
     """Test how well the system scales with concurrent requests."""
 
@@ -438,7 +446,7 @@ class TestConcurrencyScaling:
         print("BENCHMARK: Concurrency Scaling")
         print("=" * 60)
 
-        req = ChatReq(messages=[{"role": "user", "content": "Hello"}], model="gpt-3.5-turbo")
+        req = ChatReq(messages=[{"role": "user", "content": f"Hello {time.perf_counter()}"}], model="gpt-3.5-turbo")
 
         scaling_results = []
 
@@ -449,9 +457,9 @@ class TestConcurrencyScaling:
             results.start()
 
             async def make_request():
-                req_start = time.time()
+                req_start = time.perf_counter()
                 await services["chat"].chat(req, "127.0.0.1")
-                return (time.time() - req_start) * 1000
+                return (time.perf_counter() - req_start) * 1000
 
             tasks = [make_request() for _ in range(concurrency)]
             latencies = await asyncio.gather(*tasks)

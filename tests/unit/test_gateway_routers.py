@@ -25,7 +25,7 @@ class TestChatRouter:
         """Test successful chat request."""
         from services.gateway.models import ChatReq
         from services.gateway.routers.chat import chat
-        from services.gateway.services import ChatService
+        from services.gateway.services import AsyncChatService
 
         async def mock_chat(req, client_ip):
             return {"ok": True, "data": "response", "meta": {"model": "gpt-4"}}
