@@ -8,21 +8,23 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..deps import require_key
 from ..models import IndexChunksReq, IndexChunksResp, RetrieveReq, RetrieveResp, SearchReq, SearchResp
-from ..services import VectorService
+from ..services import AsyncVectorService
 
 router = APIRouter(tags=["index", "search", "retrieve"])
 
 
-def get_vector_service() -> VectorService:
-    """Dependency injection for VectorService."""
-    return VectorService()
+async def get_async_vector_service() -> AsyncVectorService:
+    """Dependency injection for AsyncVectorService."""
+    return AsyncVectorService()
 
 
 @router.post("/index/chunks", dependencies=[Depends(require_key)], response_model=IndexChunksResp)
-def index_chunks(req: IndexChunksReq, service: VectorService = Depends(get_vector_service)) -> Dict[str, Any]:
-    """Index text chunks into Qdrant vector database."""
+async def index_chunks(
+    req: IndexChunksReq, service: AsyncVectorService = Depends(get_async_vector_service)
+) -> Dict[str, Any]:
+    """Index text chunks into Qdrant vector database (asynchronous)."""
     try:
-        return service.index_chunks(req)
+        return await service.index_chunks(req)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except RuntimeError as re:
@@ -35,10 +37,10 @@ def index_chunks(req: IndexChunksReq, service: VectorService = Depends(get_vecto
 
 
 @router.post("/search", dependencies=[Depends(require_key)], response_model=SearchResp)
-def search(req: SearchReq, service: VectorService = Depends(get_vector_service)) -> Dict[str, Any]:
-    """Vector similarity search."""
+async def search(req: SearchReq, service: AsyncVectorService = Depends(get_async_vector_service)) -> Dict[str, Any]:
+    """Vector similarity search (asynchronous)."""
     try:
-        return service.search(req)
+        return await service.search(req)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except RuntimeError as re:
@@ -51,10 +53,10 @@ def search(req: SearchReq, service: VectorService = Depends(get_vector_service))
 
 
 @router.post("/retrieve", dependencies=[Depends(require_key)], response_model=RetrieveResp)
-def retrieve(req: RetrieveReq, service: VectorService = Depends(get_vector_service)) -> Dict[str, Any]:
-    """Hybrid retrieval: vector search + graph neighborhood expansion."""
+async def retrieve(req: RetrieveReq, service: AsyncVectorService = Depends(get_async_vector_service)) -> Dict[str, Any]:
+    """Hybrid retrieval: vector search + graph neighborhood expansion (asynchronous)."""
     try:
-        return service.retrieve(req)
+        return await service.retrieve(req)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:

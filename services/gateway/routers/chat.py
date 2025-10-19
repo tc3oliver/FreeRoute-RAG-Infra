@@ -8,26 +8,28 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..deps import require_key
 from ..models import ChatReq, ChatResp, EmbedReq, EmbedResp, RerankReq, RerankResp
-from ..repositories import call_reranker
-from ..services import ChatService
+from ..repositories import call_reranker_async
+from ..services import AsyncChatService
 
 router = APIRouter(tags=["chat", "embed"])
 
 
-def get_chat_service() -> ChatService:
-    """Dependency injection for ChatService."""
-    return ChatService()
+async def get_async_chat_service() -> AsyncChatService:
+    """Dependency injection for AsyncChatService."""
+    return AsyncChatService()
 
 
 @router.post("/chat", dependencies=[Depends(require_key)], response_model=ChatResp)
-def chat(req: ChatReq, request: Request, service: ChatService = Depends(get_chat_service)) -> Dict[str, Any]:
-    """Process a chat completion request."""
+async def chat(
+    req: ChatReq, request: Request, service: AsyncChatService = Depends(get_async_chat_service)
+) -> Dict[str, Any]:
+    """Process a chat completion request (asynchronous)."""
     messages = req.messages
     if not isinstance(messages, list) or not messages:
         raise HTTPException(status_code=400, detail="messages must be a non-empty array")
 
     try:
-        return service.chat(req, request.client.host)
+        return await service.chat(req, request.client.host)
     except Exception as e:
         import logging
 
@@ -36,10 +38,10 @@ def chat(req: ChatReq, request: Request, service: ChatService = Depends(get_chat
 
 
 @router.post("/embed", dependencies=[Depends(require_key)], response_model=EmbedResp)
-def embed(req: EmbedReq, service: ChatService = Depends(get_chat_service)) -> Dict[str, Any]:
-    """Generate embeddings for texts."""
+async def embed(req: EmbedReq, service: AsyncChatService = Depends(get_async_chat_service)) -> Dict[str, Any]:
+    """Generate embeddings for texts (asynchronous)."""
     try:
-        return service.embed(req)
+        return await service.embed(req)
     except Exception as e:
         import logging
 
@@ -48,10 +50,10 @@ def embed(req: EmbedReq, service: ChatService = Depends(get_chat_service)) -> Di
 
 
 @router.post("/rerank", dependencies=[Depends(require_key)], response_model=RerankResp)
-def rerank(req: RerankReq) -> Dict[str, Any]:
-    """Rerank documents using the reranker service."""
+async def rerank(req: RerankReq) -> Dict[str, Any]:
+    """Rerank documents using the reranker service (asynchronous)."""
     try:
-        result = call_reranker(req.query, req.documents, req.top_n)
+        result = await call_reranker_async(req.query, req.documents, req.top_n)
         return {"ok": True, "results": result.get("results", [])}
     except Exception as e:
         import logging
