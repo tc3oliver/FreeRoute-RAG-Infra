@@ -1,6 +1,7 @@
 # === 標準函式庫 ===
 import logging
 import os
+from contextlib import asynccontextmanager
 
 # === 第三方套件 ===
 # For backward compatibility with tests (re-export commonly used imports)
@@ -12,7 +13,12 @@ from .config import APP_VERSION
 from .middleware import METRICS_ENABLED  # noqa: F401
 from .middleware import RequestContextFilter, add_request_id, prometheus_middleware
 from .models import ChatReq, ChatResp, EmbedReq, EmbedResp, GraphProbeReq, GraphProbeResp, GraphReq  # noqa: F401
-from .repositories import get_litellm_client  # noqa: F401
+from .repositories import (
+    close_async_litellm_client,
+    close_async_neo4j_driver,
+    close_async_qdrant_client,
+    get_async_litellm_client,
+)
 from .routers import chat, graph, meta, vector
 from .routers.meta import health, version, whoami  # noqa: F401
 from .utils import dedup_merge_nodes as _dedup_merge_nodes  # noqa: F401
@@ -24,11 +30,30 @@ from .utils import prune_graph as _prune_graph
 from .utils import retry_once_429 as _retry_once_429
 from .utils import sha1 as _sha1
 
-# For tests that expect client directly on app module
-client = get_litellm_client()
+
+# === FastAPI lifespan：確保關閉非同步客戶端資源 ===
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    try:
+        yield
+    finally:
+        # 儘管路由已全面改為非同步，仍可能有背景資源需要釋放
+        try:
+            await close_async_litellm_client()
+        except Exception:
+            pass
+        try:
+            await close_async_qdrant_client()
+        except Exception:
+            pass
+        try:
+            await close_async_neo4j_driver()
+        except Exception:
+            pass
+
 
 # === FastAPI 應用 ===
-app = FastAPI(title="FreeRoute RAG Infra – API Gateway", version=APP_VERSION)
+app = FastAPI(title="FreeRoute RAG Infra – API Gateway", version=APP_VERSION, lifespan=_lifespan)
 
 # basic structured logging (可被 uvicorn 設定覆蓋)
 logger = logging.getLogger("gateway")
@@ -67,37 +92,3 @@ _chat_handler = chat.chat  # noqa: F401
 _embed_handler = chat.embed  # noqa: F401
 _graph_extract_handler = graph.graph_extract  # noqa: F401
 _graph_probe_handler = graph.graph_probe  # noqa: F401
-
-
-# Compatibility wrappers for tests that call functions directly
-def chat(req: ChatReq, request):
-    """Backward compatibility wrapper for tests."""
-    messages = req.messages
-    if not isinstance(messages, list) or not messages:
-        raise HTTPException(status_code=400, detail="messages must be a non-empty array")
-
-    from .services import ChatService
-
-    service = ChatService()
-    return service.chat(req, request.client.host if hasattr(request, "client") else "127.0.0.1")
-
-
-def graph_extract(req: GraphReq, request):
-    """Backward compatibility wrapper for tests."""
-    from .services import GraphService
-
-    service = GraphService()
-    try:
-        return service.extract(req, request.client.host if hasattr(request, "client") else "127.0.0.1")
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-    except HTTPException:
-        raise
-
-
-def graph_probe(req: GraphProbeReq, request):
-    """Backward compatibility wrapper for tests."""
-    from .services import GraphService
-
-    service = GraphService()
-    return service.probe(req, request.client.host if hasattr(request, "client") else "127.0.0.1")

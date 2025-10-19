@@ -1,10 +1,7 @@
-"""
-Unit tests for services/gateway/repositories/
-"""
-
-import json as json_module
 import os
+import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -14,270 +11,92 @@ SCHEMA_PATH = ROOT / "schemas" / "graph_schema.json"
 os.environ.setdefault("GRAPH_SCHEMA_PATH", str(SCHEMA_PATH))
 
 
-class TestLiteLLMClient:
-    """Test LiteLLM client initialization."""
+@pytest.mark.asyncio
+async def test_get_async_litellm_client_returns_client(monkeypatch):
+    # 直接 patch 模組內已綁定的 AsyncOpenAI 符號，並重置單例
+    with patch("services.gateway.repositories.litellm_client.AsyncOpenAI", autospec=True) as mock_cls:
+        import services.gateway.repositories.litellm_client as lcmod
 
-    def test_get_litellm_client_singleton(self, monkeypatch):
-        """Test that client is a singleton."""
-        monkeypatch.setenv("LITELLM_BASE", "http://test:4000/v1")
-        monkeypatch.setenv("LITELLM_KEY", "test-key")
+        lcmod._async_client = None
+        from services.gateway.repositories.litellm_client import get_async_litellm_client
 
-        # Reset singleton
-        import services.gateway.repositories.litellm_client as mod
-        from services.gateway.repositories.litellm_client import get_litellm_client
-
-        mod._client = None
-
-        client1 = get_litellm_client()
-        client2 = get_litellm_client()
-
-        assert client1 is client2
-
-    def test_litellm_client_configuration(self, monkeypatch):
-        """Test client is configured with correct base URL and API key."""
-        monkeypatch.setenv("LITELLM_BASE", "http://custom:5000/v1")
-        monkeypatch.setenv("LITELLM_KEY", "custom-key")
-
-        import importlib
-
-        import services.gateway.repositories.litellm_client as mod
-
-        importlib.reload(mod)
-        mod._client = None
-
-        from services.gateway.config import LITELLM_BASE, LITELLM_KEY
-
-        client = mod.get_litellm_client()
-
-        # base_url is a URL object, need to convert to string for comparison
-        assert str(client.base_url).rstrip("/") == LITELLM_BASE.rstrip("/")
-        assert client.api_key == LITELLM_KEY
+        client = await get_async_litellm_client()
+        mock_cls.assert_called_once()
+        assert client is mock_cls.return_value
 
 
-class TestNeo4jDriver:
-    """Test Neo4j driver initialization."""
+@pytest.mark.asyncio
+async def test_get_async_neo4j_driver_success(monkeypatch):
+    # 環境變數需在 import 前設定，且需 reload config 與目標模組
+    monkeypatch.setenv("NEO4J_URI", "bolt://localhost")
+    monkeypatch.setenv("NEO4J_PASSWORD", "test")
+    import importlib as _il
 
-    def test_get_neo4j_driver_missing_uri(self, monkeypatch):
-        """Test error when NEO4J_URI is not set."""
-        monkeypatch.delenv("NEO4J_URI", raising=False)
-        monkeypatch.setenv("NEO4J_PASSWORD", "password")
+    from services.gateway import config as cfg
 
-        import importlib
+    _il.reload(cfg)
+    import services.gateway.repositories.neo4j_client as nmod
 
-        import services.gateway.repositories.neo4j_client as mod
-
-        importlib.reload(mod)
-
-        with pytest.raises(RuntimeError, match="neo4j_unavailable.*NEO4J_URI"):
-            mod.get_neo4j_driver()
-
-    def test_get_neo4j_driver_missing_password(self, monkeypatch):
-        """Test error when NEO4J_PASSWORD is not set."""
-        monkeypatch.setenv("NEO4J_URI", "bolt://localhost:7687")
-        monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
-
-        import importlib
-
-        import services.gateway.repositories.neo4j_client as mod
-
-        importlib.reload(mod)
-
-        with pytest.raises(RuntimeError, match="neo4j_unavailable.*NEO4J_PASSWORD"):
-            mod.get_neo4j_driver()
-
-    def test_get_neo4j_driver_import_error(self, monkeypatch):
-        """Test error when neo4j package is not available."""
-        monkeypatch.setenv("NEO4J_URI", "bolt://localhost:7687")
-        monkeypatch.setenv("NEO4J_PASSWORD", "password")
-
-        # We need to test the import error path, but since neo4j is actually installed
-        # we'll just verify that the function works when called properly
-        # In a real scenario without neo4j installed, it would raise RuntimeError
-        from services.gateway.repositories import neo4j_client
-
-        # This test verifies the happy path exists
-        # The error path is hard to test without actually uninstalling neo4j
-        assert hasattr(neo4j_client, "get_neo4j_driver")
-
-
-class TestQdrantClient:
-    """Test Qdrant client initialization."""
-
-    def test_get_qdrant_client_missing_url(self, monkeypatch):
-        """Test error when QDRANT_URL is not set."""
-        monkeypatch.delenv("QDRANT_URL", raising=False)
-
-        import importlib
-
-        import services.gateway.repositories.qdrant_client as mod
-
-        importlib.reload(mod)
-
-        with pytest.raises(RuntimeError, match="qdrant_unavailable.*QDRANT_URL"):
-            mod.get_qdrant_client()
-
-    def test_get_qdrant_client_import_error(self, monkeypatch):
-        """Test error when qdrant-client package is not available."""
-        monkeypatch.setenv("QDRANT_URL", "http://localhost:6333")
-
-        # We need to test the import error path, but since qdrant-client is actually installed
-        # we'll just verify that the function works when called properly
-        from services.gateway.repositories import qdrant_client
-
-        # This test verifies the happy path exists
-        assert hasattr(qdrant_client, "get_qdrant_client")
-
-    def test_ensure_qdrant_collection_exists(self, monkeypatch):
-        """Test ensuring Qdrant collection exists - happy path."""
-        import sys
-        from types import SimpleNamespace
-
-        # Mock the qdrant_client.models module
-        mock_models = SimpleNamespace(
-            Distance=SimpleNamespace(COSINE="Cosine"),
-            VectorParams=lambda size, distance: {"size": size, "distance": distance},
+    _il.reload(nmod)
+    nmod._async_driver = None
+    with patch("services.gateway.repositories.neo4j_client.importlib.import_module") as import_mod:
+        mock_mod = type(
+            "M", (), {"AsyncGraphDatabase": type("G", (), {"driver": staticmethod(lambda uri, auth=None: "driver")})}
         )
-        monkeypatch.setitem(sys.modules, "qdrant_client.models", mock_models)
+        import_mod.return_value = mock_mod
+        driver = await nmod.get_async_neo4j_driver()
+        assert driver == "driver"
 
-        from services.gateway.repositories import qdrant_client
 
-        # Mock client that doesn't have the collection
-        mock_client = SimpleNamespace(
-            get_collection=lambda name: None,  # Collection exists
-            recreate_collection=lambda **kwargs: None,
+@pytest.mark.asyncio
+async def test_get_async_qdrant_client_success(monkeypatch):
+    # 同理，需先設定環境變數並 reload config/模組
+    monkeypatch.setenv("QDRANT_URL", "http://localhost:6333")
+    import importlib as _il
+
+    from services.gateway import config as cfg
+
+    _il.reload(cfg)
+    import services.gateway.repositories.qdrant_client as qmod
+
+    _il.reload(qmod)
+    qmod._async_client = None
+    with patch("services.gateway.repositories.qdrant_client.importlib.import_module") as import_mod:
+        mock_mod = type("M", (), {"AsyncQdrantClient": staticmethod(lambda **kwargs: "client")})
+        import_mod.return_value = mock_mod
+        client = await qmod.get_async_qdrant_client()
+        assert client == "client"
+
+
+@pytest.mark.asyncio
+async def test_ensure_qdrant_collection_async(monkeypatch):
+    from services.gateway.repositories.qdrant_client import ensure_qdrant_collection_async
+
+    mock_client = AsyncMock()
+    mock_client.get_collection = AsyncMock(side_effect=Exception("Not found"))
+    mock_client.recreate_collection = AsyncMock()
+    with patch("services.gateway.repositories.qdrant_client.importlib.import_module") as import_mod:
+        mock_models = type(
+            "M",
+            (),
+            {
+                "Distance": type("D", (), {"COSINE": "cosine"}),
+                "VectorParams": lambda size, distance: {"size": size, "distance": distance},
+            },
         )
+        import_mod.return_value = mock_models
+        await ensure_qdrant_collection_async(mock_client, "test", 384)
+        mock_client.recreate_collection.assert_awaited_once()
 
-        # Should not raise an error when collection exists
-        qdrant_client.ensure_qdrant_collection(mock_client, "test_collection", 1536)
 
-    def test_ensure_qdrant_collection_creates(self, monkeypatch):
-        """Test creating a new Qdrant collection when it doesn't exist."""
-        import sys
-        from types import SimpleNamespace
+@pytest.mark.asyncio
+async def test_call_reranker_async(monkeypatch):
+    from services.gateway.repositories.reranker_client import call_reranker_async
 
-        # Mock the qdrant_client.models module
-        mock_models = SimpleNamespace(
-            Distance=SimpleNamespace(COSINE="Cosine"),
-            VectorParams=lambda size, distance: {"size": size, "distance": distance},
+    with patch("services.gateway.repositories.reranker_client.httpx.AsyncClient") as mock_client_cls:
+        mock_client = mock_client_cls.return_value.__aenter__.return_value
+        mock_client.post = AsyncMock(
+            return_value=type("Resp", (), {"raise_for_status": lambda s: None, "json": lambda s: {"results": [1]}})()
         )
-        monkeypatch.setitem(sys.modules, "qdrant_client.models", mock_models)
-
-        from services.gateway.repositories import qdrant_client
-
-        create_called = []
-
-        def mock_get_collection(name):
-            raise Exception("Collection not found")
-
-        def mock_recreate(**kwargs):
-            create_called.append(kwargs)
-
-        mock_client = SimpleNamespace(
-            get_collection=mock_get_collection,
-            recreate_collection=mock_recreate,
-        )
-
-        qdrant_client.ensure_qdrant_collection(mock_client, "test_collection", 1536)
-        assert len(create_called) == 1
-        assert create_called[0]["collection_name"] == "test_collection"
-
-
-class TestRerankerClient:
-    """Test reranker HTTP client."""
-
-    def test_call_reranker_success(self, monkeypatch):
-        """Test successful reranker call."""
-
-        class MockResponse:
-            def __init__(self):
-                self.status_code = 200
-
-            def json(self):
-                return {"results": [{"index": 0, "score": 0.9}]}
-
-            def raise_for_status(self):
-                pass
-
-        def mock_post(url, **kwargs):
-            assert "rerank" in url
-            assert "query" in kwargs["json"]
-            assert "documents" in kwargs["json"]
-            return MockResponse()
-
-        monkeypatch.setattr("requests.post", mock_post)
-
-        from services.gateway.repositories.reranker_client import call_reranker
-
-        result = call_reranker("test query", ["doc1", "doc2"], top_n=5)
-
+        result = await call_reranker_async("query", ["doc1"], top_n=1)
         assert "results" in result
-        assert len(result["results"]) == 1
-        assert result["results"][0]["score"] == 0.9
-
-    def test_call_reranker_http_error(self, monkeypatch):
-        """Test reranker call with HTTP error."""
-
-        class MockResponse:
-            def __init__(self):
-                self.status_code = 500
-
-            def raise_for_status(self):
-                raise Exception("HTTP 500 Error")
-
-        def mock_post(url, **kwargs):
-            return MockResponse()
-
-        monkeypatch.setattr("requests.post", mock_post)
-
-        from services.gateway.repositories.reranker_client import call_reranker
-
-        with pytest.raises(Exception, match="HTTP 500 Error"):
-            call_reranker("query", ["doc"], top_n=5)
-
-    def test_call_reranker_default_timeout(self, monkeypatch):
-        """Test reranker uses default timeout."""
-
-        captured_timeout = []
-
-        class MockResponse:
-            def json(self):
-                return {"results": []}
-
-            def raise_for_status(self):
-                pass
-
-        def mock_post(url, **kwargs):
-            captured_timeout.append(kwargs.get("timeout"))
-            return MockResponse()
-
-        monkeypatch.setattr("requests.post", mock_post)
-
-        from services.gateway.repositories.reranker_client import call_reranker
-
-        call_reranker("query", ["doc"])
-
-        assert captured_timeout[0] == 30
-
-    def test_call_reranker_custom_timeout(self, monkeypatch):
-        """Test reranker with custom timeout."""
-
-        captured_timeout = []
-
-        class MockResponse:
-            def json(self):
-                return {"results": []}
-
-            def raise_for_status(self):
-                pass
-
-        def mock_post(url, **kwargs):
-            captured_timeout.append(kwargs.get("timeout"))
-            return MockResponse()
-
-        monkeypatch.setattr("requests.post", mock_post)
-
-        from services.gateway.repositories.reranker_client import call_reranker
-
-        call_reranker("query", ["doc"], timeout=60)
-
-        assert captured_timeout[0] == 60

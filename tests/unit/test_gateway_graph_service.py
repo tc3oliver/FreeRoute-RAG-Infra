@@ -3,19 +3,20 @@ import os
 os.environ["GRAPH_SCHEMA_PATH"] = "/root/projects/free-rag/schemas/graph_schema.json"
 
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
 
+import services.gateway.services.async_graph_service as async_graph_service_mod
 from services.gateway.models import KV, GraphData, GraphProbeReq, GraphQueryReq, GraphReq, GraphUpsertReq
-from services.gateway.services.graph_service import GraphService
 
 
 class DummyClient:
     class chat:
         class completions:
             @staticmethod
-            def create(**kwargs):
+            async def create(**kwargs):
                 # 模擬 LLM 回傳
                 if kwargs.get("model") == "fail-model":
                     raise Exception("fail")
@@ -41,90 +42,124 @@ class DummyClient:
                 )
 
 
-def test_probe_json(monkeypatch):
-    svc = GraphService()
+@pytest.mark.asyncio
+async def test_probe_json(monkeypatch):
+    os.environ["NEO4J_URI"] = "bolt://dummy"
+    os.environ["NEO4J_PASSWORD"] = "dummy"
+    svc = async_graph_service_mod.AsyncGraphService()
     monkeypatch.setattr(svc, "client", DummyClient())
+
+    async def dummy_driver():
+        class Dummy:
+            pass
+
+        return Dummy()
+
+    monkeypatch.setattr(async_graph_service_mod, "get_async_neo4j_driver", dummy_driver)
     req = GraphProbeReq(model="dummy", messages=None, strict_json=True, temperature=0.1, timeout=1)
-    out = svc.probe(req, "127.0.0.1")
+    out = await svc.probe(req, "127.0.0.1")
     assert out["ok"]
     assert out["mode"] == "json"
 
 
-def test_probe_text(monkeypatch):
-    svc = GraphService()
+@pytest.mark.asyncio
+async def test_probe_text(monkeypatch):
+    os.environ["NEO4J_URI"] = "bolt://dummy"
+    os.environ["NEO4J_PASSWORD"] = "dummy"
+    svc = async_graph_service_mod.AsyncGraphService()
     monkeypatch.setattr(svc, "client", DummyClient())
+
+    async def dummy_driver():
+        class Dummy:
+            pass
+
+        return Dummy()
+
+    monkeypatch.setattr(async_graph_service_mod, "get_async_neo4j_driver", dummy_driver)
     req = GraphProbeReq(model="dummy", messages=None, strict_json=False, temperature=0.1, timeout=1)
-    out = svc.probe(req, "127.0.0.1")
+    out = await svc.probe(req, "127.0.0.1")
     assert out["ok"]
     assert out["mode"] == "text"
 
 
-def test_upsert(monkeypatch):
-    svc = GraphService()
+@pytest.mark.asyncio
+async def test_upsert(monkeypatch):
+    svc = async_graph_service_mod.AsyncGraphService()
+
+    class DummySession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+        async def run(self, *a, **k):
+            return None
 
     class DummyDriver:
         def session(self):
-            class S:
-                def __enter__(self):
-                    return self
+            return DummySession()
 
-                def __exit__(self, *a):
-                    pass
+    async def dummy_driver():
+        return DummyDriver()
 
-                def run(self, *a, **k):
-                    return None
-
-            return S()
-
-    monkeypatch.setattr("services.gateway.services.graph_service.get_neo4j_driver", lambda: DummyDriver())
+    monkeypatch.setattr(async_graph_service_mod, "get_async_neo4j_driver", dummy_driver)
     data = GraphData(
         nodes=[{"id": "n1", "type": "Person", "props": []}],
         edges=[{"src": "n1", "dst": "n2", "type": "EMPLOYED_AT", "props": []}],
     )
     req = GraphUpsertReq(data=data)
-    out = svc.upsert(req)
+    out = await svc.upsert(req)
     assert out["ok"]
     assert out["nodes"] == 1
     assert out["edges"] == 1
 
 
-def test_query(monkeypatch):
-    svc = GraphService()
+@pytest.mark.asyncio
+async def test_query(monkeypatch):
+    svc = async_graph_service_mod.AsyncGraphService()
+
+    class DummySession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+        async def run(self, q, **params):
+            class R:
+                def data(self):
+                    return {"foo": 1}
+
+            async def gen():
+                yield R()
+
+            return gen()
 
     class DummyDriver:
         def session(self):
-            class S:
-                def __enter__(self):
-                    return self
+            return DummySession()
 
-                def __exit__(self, *a):
-                    pass
+    async def dummy_driver():
+        return DummyDriver()
 
-                def run(self, q, **params):
-                    class R:
-                        def data(self):
-                            return {"foo": 1}
-
-                    return [R()]
-
-            return S()
-
-    monkeypatch.setattr("services.gateway.services.graph_service.get_neo4j_driver", lambda: DummyDriver())
+    monkeypatch.setattr(async_graph_service_mod, "get_async_neo4j_driver", dummy_driver)
     req = GraphQueryReq(query="MATCH (n) RETURN n", params={})
-    out = svc.query(req)
+    out = await svc.query(req)
     assert out["ok"]
     assert isinstance(out["records"], list)
 
 
-def test_query_invalid(monkeypatch):
-    svc = GraphService()
+@pytest.mark.asyncio
+async def test_query_invalid(monkeypatch):
+    svc = async_graph_service_mod.AsyncGraphService()
     req = GraphQueryReq(query="CREATE (n)", params={})
     with pytest.raises(ValueError):
-        svc.query(req)
+        await svc.query(req)
 
 
 def test_is_single_error_node():
     d = {"nodes": [{"id": "err", "type": "error"}], "edges": []}
-    assert GraphService._is_single_error_node(d)
+    assert async_graph_service_mod.AsyncGraphService._is_single_error_node(d)
     d2 = {"nodes": [{"id": "n1", "type": "Person"}], "edges": []}
-    assert not GraphService._is_single_error_node(d2)
+    assert not async_graph_service_mod.AsyncGraphService._is_single_error_node(d2)

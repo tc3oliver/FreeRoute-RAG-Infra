@@ -42,7 +42,7 @@ class AsyncVectorService:
         self.neo4j_driver: Any = None
 
     async def _ensure_clients(self) -> None:
-        """Lazy initialization of all clients."""
+        """Lazy initialization of all clients (async-only)."""
         if self.llm_client is None:
             self.llm_client = await get_async_litellm_client()
         if self.qdrant_client is None:

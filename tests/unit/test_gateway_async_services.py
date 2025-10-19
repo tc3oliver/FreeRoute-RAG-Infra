@@ -196,10 +196,6 @@ class TestAsyncVectorService:
     # =========================================================================
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(
-        not importlib.util.find_spec("qdrant_client"),
-        reason="qdrant_client not installed in test environment",
-    )
     async def test_index_chunks_success(self, vector_service, mock_async_clients):
         """Test successful chunk indexing."""
         # Mock embedding response
@@ -209,6 +205,32 @@ class TestAsyncVectorService:
             MagicMock(embedding=[0.4, 0.5, 0.6]),
         ]
         mock_async_clients["llm"].embeddings.create.return_value = mock_embed_response
+
+        # 準備假的 qdrant_client.models 模組（避免需要安裝 qdrant_client）
+        import sys as _sys
+        import types as _types
+
+        fake_pkg = _types.ModuleType("qdrant_client")
+        fake_pkg.__path__ = []  # 標記為 package
+        fake_models = _types.ModuleType("qdrant_client.models")
+
+        class _Filter:
+            @classmethod
+            def from_dict(cls, d):
+                return d
+
+        class _PointStruct:
+            def __init__(self, id=None, vector=None, payload=None):
+                self.id = id
+                self.vector = vector
+                self.payload = payload
+
+        fake_models.Filter = _Filter
+        fake_models.PointStruct = _PointStruct
+        fake_pkg.models = fake_models
+
+        _sys.modules["qdrant_client"] = fake_pkg
+        _sys.modules["qdrant_client.models"] = fake_models
 
         with (
             patch(
@@ -246,10 +268,6 @@ class TestAsyncVectorService:
     # =========================================================================
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(
-        not importlib.util.find_spec("qdrant_client"),
-        reason="qdrant_client not installed in test environment",
-    )
     async def test_search_success(self, vector_service, mock_async_clients):
         """Test successful vector search."""
         # Mock embedding
@@ -263,6 +281,31 @@ class TestAsyncVectorService:
             MagicMock(id="2", score=0.85, payload={"text": "Result 2"}),
         ]
         mock_async_clients["qdrant"].search.return_value = mock_search_result
+
+        # 準備假的 qdrant_client.models 模組（避免需要安裝 qdrant_client）
+        import sys as _sys
+        import types as _types
+
+        fake_pkg = _types.ModuleType("qdrant_client")
+        fake_pkg.__path__ = []
+        fake_models = _types.ModuleType("qdrant_client.models")
+
+        class _Filter:
+            @classmethod
+            def from_dict(cls, d):
+                return d
+
+        class _PointStruct:
+            def __init__(self, id=None, vector=None, payload=None):
+                self.id = id
+                self.vector = vector
+                self.payload = payload
+
+        fake_models.Filter = _Filter
+        fake_models.PointStruct = _PointStruct
+        fake_pkg.models = fake_models
+        _sys.modules["qdrant_client"] = fake_pkg
+        _sys.modules["qdrant_client.models"] = fake_models
 
         with (
             patch(

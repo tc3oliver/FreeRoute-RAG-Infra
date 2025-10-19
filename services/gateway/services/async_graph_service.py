@@ -49,10 +49,13 @@ class AsyncGraphService:
         self.client: AsyncOpenAI | None = None
         self.neo4j_driver: Any = None
 
-    async def _ensure_clients(self) -> None:
-        """Lazy initialization of all clients."""
+    async def _ensure_llm(self) -> None:
+        """Ensure LLM client is initialized (async-only)."""
         if self.client is None:
             self.client = await get_async_litellm_client()
+
+    async def _ensure_neo4j(self) -> None:
+        """Ensure Neo4j driver is initialized (async-only)."""
         if self.neo4j_driver is None:
             self.neo4j_driver = await get_async_neo4j_driver()
 
@@ -67,7 +70,7 @@ class AsyncGraphService:
         Returns:
             Dict with 'ok', 'mode', 'data/text', 'provider' keys
         """
-        await self._ensure_clients()
+        await self._ensure_llm()
 
         messages = req.messages or [
             {"role": "system", "content": "你是資訊抽取引擎，只輸出 JSON（若無法則輸出簡短文字）。"},
@@ -150,7 +153,7 @@ class AsyncGraphService:
         if not req.context or not isinstance(req.context, str) or not req.context.strip():
             raise ValueError("context must be a non-empty string")
 
-        await self._ensure_clients()
+        await self._ensure_llm()
 
         SYS_BASE = (
             "你是資訊抽取引擎，將中文文本轉為圖譜資料（nodes/edges）。"
@@ -367,7 +370,7 @@ class AsyncGraphService:
         Returns:
             Dict with 'ok', 'nodes', and 'edges' counts
         """
-        await self._ensure_clients()
+        await self._ensure_neo4j()
         data = req.data
 
         def _props_json(props: List[KV]) -> str:
@@ -432,7 +435,7 @@ class AsyncGraphService:
         if any(tok in lowered for tok in forbidden):
             raise ValueError("write_or_unsafe_query_not_allowed")
 
-        await self._ensure_clients()
+        await self._ensure_neo4j()
 
         records = []
         async with self.neo4j_driver.session() as session:

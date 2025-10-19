@@ -60,10 +60,16 @@ def test_normalize_graph_shape_and_prune():
     assert not any(p["key"] == "empty" for p in pruned["edges"][0]["props"])
 
 
-def test_chat_rejects_empty_messages():
-    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
-    with pytest.raises(app_module.HTTPException):
-        app_module.chat(app_module.ChatReq(messages=[], json_mode=False), request)
+@pytest.mark.asyncio
+async def test_chat_rejects_empty_messages_async():
+    """非同步：空 messages 應被 400 拒絕。"""
+    # 使用 app_module 內已 re-export 的 ChatReq 與 _chat_handler
+    req = app_module.ChatReq(messages=[])
+    dummy_request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    with pytest.raises(app_module.HTTPException) as exc:
+        await app_module._chat_handler(req, dummy_request)
+    assert exc.value.status_code == 400
+    assert "messages must be a non-empty array" in str(exc.value.detail)
 
 
 # ===== Additional utility function tests =====
