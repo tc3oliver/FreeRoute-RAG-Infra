@@ -110,59 +110,102 @@ uvicorn services.reranker.server:app --host 0.0.0.0 --port 9080 --reload
 ## 架構
 
 ```mermaid
-flowchart LR
-  classDef grp fill:#ffffff,stroke:#2b6cb0,stroke-width:1px,color:#1a202c;
-  classDef box fill:#f8fafc,stroke:#64748b,stroke-width:1px,color:#0f172a;
-  classDef entry fill:#ecfeff,stroke:#0891b2,stroke-width:1px,color:#0e7490;
-  classDef core fill:#f1f5f9,stroke:#334155,stroke-width:1px,color:#0f172a;
-  classDef store fill:#fefce8,stroke:#ca8a04,stroke-width:1px,color:#713f12;
-  classDef provider fill:#fdf2f8,stroke:#db2777,stroke-width:1px,color:#9d174d;
-  classDef local fill:#eef2ff,stroke:#4f46e5,stroke-width:1px,color:#312e81;
-  classDef edgeNote stroke-dasharray: 4 3;
+%% 推薦：深色展示最佳；若要淺色，將 theme 改為 "base"
+%%{init: {
+  "theme": "dark",
+  "themeVariables": {
+    "fontFamily": "Inter, Noto Sans TC, PingFang TC, Segoe UI",
+    "fontSize": "13px",
+    "primaryColor": "#0b1220",
+    "primaryBorderColor": "#60a5fa",
+    "primaryTextColor": "#e5e7eb",
+    "clusterBkg": "#0b1220",
+    "clusterBorder": "#60a5fa",
+    "lineColor": "#9ca3af",
+    "noteBkgColor": "#111827",
+    "noteBorderColor": "#6b7280"
+  },
+  "flowchart": {
+    "htmlLabels": true,
+    "curve": "basis",
+    "useMaxWidth": true,
+    "wrap": true,
+    "nodeSpacing": 50,
+    "rankSpacing": 65,
+    "diagramPadding": 16
+  }
+}}%%
 
-  subgraph CLIENT["① 用戶端 / SDK"]
-    U["👤 Web Client<br/>— REST / X-API-Key —"]:::entry
-    LC["🧰 LangChain / SDK<br/>(OpenAI 相容)"]:::entry
+flowchart LR
+
+  %% ===== Class Styles =====
+  classDef grp fill:#0b1220,stroke:#60a5fa,stroke-width:1.3px,color:#e5e7eb,rx:6,ry:6;
+  classDef box fill:#0f172a,stroke:#94a3b8,stroke-width:1px,color:#e5e7eb,rx:6,ry:6;
+  classDef entry fill:#0b3a4a,stroke:#22d3ee,stroke-width:1px,color:#cffafe,rx:6,ry:6;
+  classDef core fill:#0f172a,stroke:#7dd3fc,stroke-width:1px,color:#e5e7eb,rx:6,ry:6;
+  classDef store fill:#1f2937,stroke:#fbbf24,stroke-width:1px,color:#fde68a,rx:6,ry:6;
+  classDef provider fill:#1f2430,stroke:#fb7185,stroke-width:1px,color:#fecdd3,rx:6,ry:6;
+  classDef local fill:#111827,stroke:#a78bfa,stroke-width:1px,color:#ddd6fe,rx:6,ry:6;
+  classDef edgeNote stroke-dasharray: 4 3,color:#a1a1aa,font-size:12px;
+
+  %% ===== ① Client =====
+  subgraph CLIENT["① 客戶端 / SDK"]
+    direction TB
+    U["👤 Web Client<br/>REST · X-API-Key"]:::entry
+    LC["🧰 LangChain / SDK<br/>OpenAI-Compatible → /v1"]:::entry
   end
   class CLIENT grp
 
-  subgraph APIGW["② API Gateway (9800)<br/>— 認證 / 路由 / 協作 —"]
+  %% ===== ② API Gateway =====
+  subgraph APIGW["② API Gateway(9800)"]
+    direction TB
+    GW_V1C["/v1/chat/completions"]:::box
+    GW_V1E["/v1/embeddings"]:::box
     GW_CHAT["/chat"]:::box
-    GW_RETRIEVE["/retrieve  /search"]:::box
+    GW_RETRIEVE["/retrieve  ·  /search"]:::box
     GW_INDEX["/index/chunks"]:::box
     GW_GRAPH["/graph/*"]:::box
-    GW_EMBED["/embed"]:::box
     GW_RERANK["/rerank"]:::box
   end
   class APIGW grp
 
-  subgraph ING["③ 攝取服務 (9900)<br/>— 目錄掃描 / 分段 —"]
+  %% ===== ③ Ingest =====
+  subgraph ING["③ 攝取服務(9900)"]
+    direction TB
     ING_RUN["ingest/directory<br/>CLI / API"]:::box
   end
   class ING grp
 
-  subgraph LLMCORE["④ LiteLLM Proxy (9400)<br/>— 模型路由 / TokenCap / UI —"]
-    LC_TC["🧱 TokenCap / 路由策略"]:::core
-    LC_UI["📊 Dashboard UI"]:::core
-    LLM_BUS["🔀 OpenAI 相容路由"]:::core
-    REDIS["🧮 Redis 6379<br/>快取 / Token 計數器"]:::store
+  %% ===== ④ LLM Core =====
+  subgraph LLMCORE["④ LiteLLM(9400)"]
+    direction TB
+    LLM_V1["🔀 OpenAI-Compatible Router<br/>(/v1/* internal)"]:::core
+    LC_TC["🧱 TokenCap · 路由策略"]:::core
+    LC_UI["📊 Dashboard UI (內部)"]:::core
+    REDIS["🧮 Redis 6379<br/>快取 / Token Meter"]:::store
   end
   class LLMCORE grp
 
+  %% ===== ⑤ Local Inference =====
   subgraph LOCAL["⑤ 本地推論"]
+    direction LR
     OLLAMA["🧩 Ollama (bge-m3)<br/>Embeddings"]:::local
-    RERANK["↕️ bge-reranker-v2-m3<br/>Reranker"]:::local
+    RERANK["↕️ bge-reranker-v2-m3<br/>Rerank"]:::local
   end
   class LOCAL grp
 
-  subgraph STORAGE["⑥ 儲存 / 資料庫"]
-    QDRANT["🗂 Qdrant 6333<br/>向量索引"]:::store
-    NEO4J["🕸 Neo4j 7474/7687<br/>知識圖譜"]:::store
-    PG["📇 Postgres 5432<br/>中繼資料 / 日誌"]:::store
+  %% ===== ⑥ Storage =====
+  subgraph STORAGE["⑥ 儲存與資料庫"]
+    direction LR
+    QDRANT["🗂 Qdrant 6333<br/>Vector Index"]:::store
+    NEO4J["🕸 Neo4j 7474/7687<br/>Knowledge Graph"]:::store
+    PG["📇 Postgres 5432<br/>Metadata · Logs"]:::store
   end
   class STORAGE grp
 
+  %% ===== ⑦ Providers =====
   subgraph PROVIDERS["⑦ 雲端模型供應商"]
+    direction LR
     OAI["OpenAI"]:::provider
     GGM["Google Gemini"]:::provider
     OPR["OpenRouter"]:::provider
@@ -170,36 +213,44 @@ flowchart LR
   end
   class PROVIDERS grp
 
-  U -->|"REST（X-API-Key）"| APIGW
-  LC -->|"OpenAI 相容 API"| LLMCORE
+  %% ===== 外部連線 =====
+  U -->|"REST (X-API-Key)"| APIGW
+  LC -->|"OpenAI-Compatible (/v1/*)"| APIGW
 
-  ING_RUN -->|"呼叫 /index/chunks"| GW_INDEX
-  ING_RUN -.->|"批量"| QDRANT:::edgeNote
+  %% ===== Ingest 與檢索鏈路 =====
+  ING_RUN -->|"POST /index/chunks"| GW_INDEX
+  ING_RUN -.->|"Bulk Write"| QDRANT:::edgeNote
 
-  GW_CHAT -->|"對話 / 工具"| LLM_BUS
-  GW_RETRIEVE -->|"檢索"| QDRANT
-  GW_RETRIEVE -->|"圖查詢"| NEO4J
-  GW_INDEX -->|"分段 → 嵌入"| GW_EMBED
-  GW_EMBED -->|"本地 embeddings"| OLLAMA
-  GW_INDEX -->|"寫入向量/中繼資料"| QDRANT
-  GW_INDEX -->|"寫入 metadata"| PG
-  GW_RERANK -->|"重排序請求"| RERANK
-  GW_GRAPH -->|"upsert / query"| NEO4J
-  APIGW -->|"操作記錄"| PG
+  %% ===== Gateway 對內路由 =====
+  GW_V1C -->|"intra /v1/chat/completions"| LLM_V1
+  GW_V1E -->|"intra /v1/embeddings"| LLM_V1
+  GW_CHAT -->|"Chat/Tools → /v1"| LLM_V1
+  GW_RETRIEVE -->|"Vector Query"| QDRANT
+  GW_RETRIEVE -->|"Graph Query"| NEO4J
+  GW_INDEX -->|"Chunk → Embed"| GW_V1E
+  GW_V1E -->|"Local Embeddings"| OLLAMA
+  GW_INDEX -->|"Write Vectors + Meta"| QDRANT
+  GW_INDEX -->|"Write Metadata"| PG
+  GW_RERANK -->|"Rerank Request"| RERANK
+  GW_GRAPH -->|"Upsert / Query"| NEO4J
+  APIGW -->|"Ops Logs"| PG
 
-  LLM_BUS --> OLLAMA
-  LLM_BUS --> LC_TC
-  LLM_BUS --> LC_UI
-  LLM_BUS --> OAI
-  LLM_BUS --> GGM
-  LLM_BUS --> OPR
-  LLM_BUS --> GRQ
+  %% ===== LLM Core 內部連線與供應商 =====
+  LLM_V1 --> LC_TC
+  LLM_V1 --> LC_UI
+  LLM_V1 --> OLLAMA
+  LLM_V1 --> OAI
+  LLM_V1 --> GGM
+  LLM_V1 --> OPR
+  LLM_V1 --> GRQ
   LLMCORE --> REDIS
 
-  QDRANT -.->|"檢索結果"| RERANK:::edgeNote
-  RERANK -.->|"Top-K 排序"| LLM_BUS:::edgeNote
-  LLM_BUS -.->|"最終回答"| APIGW:::edgeNote
-  APIGW -.->|"回傳"| U:::edgeNote
+  %% ===== 結果回傳 =====
+  QDRANT -.->|"Hits"| RERANK:::edgeNote
+  RERANK -.->|"Top-K"| LLM_V1:::edgeNote
+  LLM_V1 -.->|"Answer (intra)"| APIGW:::edgeNote
+  APIGW -.->|"Response"| U:::edgeNote
+
 ```
 
 > 提示：**LangChain 建議直連 LiteLLM**（埠 **9400**）；終端應用流程走 **API Gateway**（埠 **9800**）。
@@ -402,28 +453,41 @@ python cli.py ../../data \
 
 ## API（快速範例）
 
-**LiteLLM（OpenAI 相容）— Base：`http://localhost:9400/v1`**
+**建議：透過 API Gateway 的 OpenAI 兼容 /v1（建議對外使用）**
 
-Python（LangChain）：
+對外應用或使用官方/相容 SDK（例如 OpenAI SDK、LangChain）時，建議將 client 指向 Gateway 的 OpenAI 兼容端點：`http://localhost:9800/v1`，並使用 Gateway API Key（開發預設 `dev-key`）。Gateway 提供統一認證、路由、TokenCap（成本保護）與觀測。
+
+Python（LangChain / OpenAI-compatible client，建議）：
 
 ```python
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-llm = ChatOpenAI(base_url="http://localhost:9400/v1", api_key="sk-admin",
+llm = ChatOpenAI(base_url="http://localhost:9800/v1", api_key="dev-key",
                  model="rag-answer", temperature=0.2)
-emb = OpenAIEmbeddings(base_url="http://localhost:9400/v1", api_key="sk-admin",
+emb = OpenAIEmbeddings(base_url="http://localhost:9800/v1", api_key="dev-key",
                        model="local-embed")
 
 print(llm.invoke("用三行解釋 RAG").content)
 print(len(emb.embed_query("GraphRAG 與 RAG 的差異")))
 ```
 
-cURL：
+cURL（建議透過 Gateway）:
 
 ```bash
+curl -s http://localhost:9800/v1/chat/completions \
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
+  -d '{"model":"rag-answer","messages":[{"role":"user","content":"列出 RAG 的三個優點"}]}' | jq
+```
+
+**備註：直連 LiteLLM（內部/低層測試用）**
+
+若你是內部開發者或需要直接對 LiteLLM 做低層測試，仍可連到 LiteLLM 的 OpenAI 兼容端點 `http://localhost:9400/v1` 並使用管理金鑰（`sk-admin`），但請避免在終端使用者環境中直接暴露此金鑰。範例：
+
+```bash
+# 直連 LiteLLM（僅供開發/測試）
 curl -s http://localhost:9400/v1/chat/completions \
   -H "Authorization: Bearer sk-admin" -H "Content-Type: application/json" \
-  -d '{"model":"rag-answer","messages":[{"role":"user","content":"列出 RAG 的三個優點"}]}'
+  -d '{"model":"rag-answer","messages":[{"role":"user","content":"列出 RAG 的三個優點"}]}' | jq
 ```
 
 **API Gateway — Base：`http://localhost:9800`（X-API-Key）**

@@ -57,6 +57,8 @@ curl -s -H "X-API-Key: dev-key" http://localhost:9800/whoami | jq
 | POST   | `/retrieve`      | Hybrid retrieval           | Vector + optional subgraph (`include_subgraph`) |
 | POST   | `/chat`          | Chat completions           | `json_mode=true` injects JSON-only hint         |
 | POST   | `/embed`         | Embeddings                 | Uses `local-embed` (Ollama)                     |
+| POST   | `/v1/chat/completions` | OpenAI-style chat completions | OpenAI-compatible endpoint — point SDK to Gateway `http://localhost:9800/v1` and use Gateway API key |
+| POST   | `/v1/embeddings`  | OpenAI-style embeddings    | OpenAI-compatible endpoint for embeddings — use Gateway `http://localhost:9800/v1` |
 | POST   | `/rerank`        | Rerank docs                | Forwards to Reranker (`RERANKER_URL`)           |
 | POST   | `/graph/extract` | LLM graph extraction       | Provider chain + schema validation              |
 | POST   | `/graph/upsert`  | Write nodes/edges to Neo4j | MERGE nodes/edges                               |
@@ -95,6 +97,32 @@ curl -s -H "X-API-Key: dev-key" http://localhost:9800/whoami | jq
 ## API Gateway (Base: `http://localhost:9800`)
 
 **Auth**: `X-API-Key: <key>` (or Bearer)
+
+### Using OpenAI SDK with the Gateway's /v1 (OpenAI-style)
+
+If you want to use the official OpenAI SDK (or a compatible client) to call the Gateway's OpenAI-style API (for example `/v1/chat/completions` and `/v1/embeddings`), point the SDK's base URL to `http://localhost:9800/v1` and use the Gateway API Key as the Bearer token (or `X-API-Key` header). In most cases your existing client code won't need changes other than the client initialization.
+
+Example (Python, using the new openai client):
+
+```python
+from openai import OpenAI
+
+# Point the client to the Gateway's OpenAI-compatible endpoint
+client = OpenAI(base_url="http://localhost:9800/v1", api_key="dev-key")
+
+# Chat
+resp = client.chat.completions.create(
+  model="rag-answer",
+  messages=[{"role": "user", "content": "Summarize RAG in two sentences"}],
+)
+print(resp)
+
+# Embeddings
+emb = client.embeddings.create(model="local-embed", input=["What is RAG?"])
+print(emb)
+```
+
+Note: the Gateway validates `X-API-Key` or `Authorization: Bearer <key>`. The default development key is `dev-key`.
 
 ### `POST /index/chunks`
 

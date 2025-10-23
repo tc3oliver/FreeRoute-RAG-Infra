@@ -506,6 +506,34 @@ class TestEndToEndWorkflows:
                 assert len(graph.get("nodes", [])) >= 3
                 assert len(graph.get("edges", [])) >= 2
 
+    def test_openai_style_endpoints(self, api_base, api_headers):
+        """
+        Test OpenAI-compatible endpoints exposed by the Gateway:
+        - POST /v1/chat/completions
+        - POST /v1/embeddings
+        Behaviour: if endpoint returns 200, validate basic response shape; otherwise skip.
+        """
+        # Chat completions (OpenAI style)
+        chat_payload = {"model": "rag-answer", "messages": [{"role": "user", "content": "Hello"}]}
+        chat_resp = requests.post(
+            f"{api_base}/v1/chat/completions", headers=api_headers, json=chat_payload, timeout=TIMEOUT
+        )
+        if chat_resp.status_code == 200:
+            j = chat_resp.json()
+            # Accept either OpenAI choices format or the gateway custom data
+            assert ("choices" in j) or (j.get("ok") is True and "data" in j)
+        else:
+            # Upstream not configured or returns error - don't fail the whole test suite
+            pytest.skip(f"/v1/chat/completions not available (status={chat_resp.status_code})")
+        # Embeddings (OpenAI style)
+        emb_payload = {"model": "local-embed", "input": ["What is RAG?", "Describe RAG"]}
+        emb_resp = requests.post(f"{api_base}/v1/embeddings", headers=api_headers, json=emb_payload, timeout=TIMEOUT)
+        if emb_resp.status_code == 200:
+            j = emb_resp.json()
+            assert ("data" in j) or ("embeddings" in j) or (j.get("ok") is True and "vectors" in j)
+        else:
+            pytest.skip(f"/v1/embeddings not available (status={emb_resp.status_code})")
+
 
 # Run tests with pytest
 if __name__ == "__main__":

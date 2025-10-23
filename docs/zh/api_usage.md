@@ -57,6 +57,8 @@ curl -s -H "X-API-Key: dev-key" http://localhost:9800/whoami | jq
 | POST | `/retrieve`      | 混合檢索          | 向量 +（可選）子圖 `include_subgraph`    |
 | POST | `/chat`          | 對話補全          | `json_mode=true` 注入 JSON-only 提示 |
 | POST | `/embed`         | 產生 Embeddings | 使用 `local-embed`（Ollama）         |
+| POST | `/v1/chat/completions` | OpenAI 風格的對話補全 | OpenAI 相容端點 — 將 SDK 指向 Gateway `http://localhost:9800/v1` 並使用 Gateway API key |
+| POST | `/v1/embeddings`  | OpenAI 風格的 Embeddings | OpenAI 相容的 embeddings 端點 — 使用 Gateway `http://localhost:9800/v1` |
 | POST | `/rerank`        | 文本重排序         | 轉發至 Reranker（`RERANKER_URL`）     |
 | POST | `/graph/extract` | 圖譜抽取          | Provider chain + Schema 驗證       |
 | POST | `/graph/upsert`  | 寫入 Neo4j      | MERGE 節點/邊                       |
@@ -96,6 +98,32 @@ curl -s -H "X-API-Key: dev-key" http://localhost:9800/whoami | jq
 ## API Gateway（Base：`http://localhost:9800`）
 
 **Auth**：`X-API-Key: <key>`（或 Bearer）
+
+### 使用 OpenAI SDK 指向 Gateway 的 /v1（OpenAI 風格）
+
+如果你想直接用官方 OpenAI SDK（或相容的實作）呼叫 Gateway 的 OpenAI 風格 API（例如 `/v1/chat/completions`、`/v1/embeddings`），只要把 SDK 的 base URL 指向 `http://localhost:9800/v1`，並以 Gateway 的 API Key 當作 Bearer token（或使用 `X-API-Key` header）。這樣絕大多數現有程式碼不需要修改，只需更改 client 初始化的 endpoint 與金鑰。
+
+範例（Python，使用 openai 的新版 client）
+
+```python
+from openai import OpenAI
+
+# 指向 Gateway 的 OpenAI 兼容端點
+client = OpenAI(base_url="http://localhost:9800/v1", api_key="dev-key")
+
+# Chat
+resp = client.chat.completions.create(
+  model="rag-answer",
+  messages=[{"role": "user", "content": "Summarize RAG in two sentences"}],
+)
+print(resp)
+
+# Embeddings
+emb = client.embeddings.create(model="local-embed", input=["What is RAG?"])
+print(emb)
+```
+
+備註：Gateway 會驗證 `X-API-Key` 或 `Authorization: Bearer <key>`。開發預設金鑰為 `dev-key`。
 
 ### `POST /index/chunks` — 上傳分段向量至 Qdrant
 

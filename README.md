@@ -110,59 +110,103 @@ uvicorn services.reranker.server:app --host 0.0.0.0 --port 9080 --reload
 ## Architecture
 
 ```mermaid
-flowchart LR
-  classDef grp fill:#ffffff,stroke:#2b6cb0,stroke-width:1px,color:#1a202c;
-  classDef box fill:#f8fafc,stroke:#64748b,stroke-width:1px,color:#0f172a;
-  classDef entry fill:#ecfeff,stroke:#0891b2,stroke-width:1px,color:#0e7490;
-  classDef core fill:#f1f5f9,stroke:#334155,stroke-width:1px,color:#0f172a;
-  classDef store fill:#fefce8,stroke:#ca8a04,stroke-width:1px,color:#713f12;
-  classDef provider fill:#fdf2f8,stroke:#db2777,stroke-width:1px,color:#9d174d;
-  classDef local fill:#eef2ff,stroke:#4f46e5,stroke-width:1px,color:#312e81;
-  classDef edgeNote stroke-dasharray: 4 3;
+%% Recommended version: optimized for dark mode display
+%% For light theme, change "theme" to "base"
+%%{init: {
+  "theme": "dark",
+  "themeVariables": {
+    "fontFamily": "Inter, Noto Sans, Segoe UI, Roboto",
+    "fontSize": "13px",
+    "primaryColor": "#0b1220",
+    "primaryBorderColor": "#60a5fa",
+    "primaryTextColor": "#e5e7eb",
+    "clusterBkg": "#0b1220",
+    "clusterBorder": "#60a5fa",
+    "lineColor": "#9ca3af",
+    "noteBkgColor": "#111827",
+    "noteBorderColor": "#6b7280"
+  },
+  "flowchart": {
+    "htmlLabels": true,
+    "curve": "basis",
+    "useMaxWidth": true,
+    "wrap": true,
+    "nodeSpacing": 50,
+    "rankSpacing": 65,
+    "diagramPadding": 16
+  }
+}}%%
 
-  subgraph CLIENT["① Clients / SDK"]
-    U["👤 Web Client<br/>— REST / X-API-Key —"]:::entry
-    LC["🧰 LangChain / SDK<br/>(OpenAI-Compatible)"]:::entry
+flowchart LR
+
+  %% ===== Class Styles =====
+  classDef grp fill:#0b1220,stroke:#60a5fa,stroke-width:1.3px,color:#e5e7eb,rx:6,ry:6;
+  classDef box fill:#0f172a,stroke:#94a3b8,stroke-width:1px,color:#e5e7eb,rx:6,ry:6;
+  classDef entry fill:#0b3a4a,stroke:#22d3ee,stroke-width:1px,color:#cffafe,rx:6,ry:6;
+  classDef core fill:#0f172a,stroke:#7dd3fc,stroke-width:1px,color:#e5e7eb,rx:6,ry:6;
+  classDef store fill:#1f2937,stroke:#fbbf24,stroke-width:1px,color:#fde68a,rx:6,ry:6;
+  classDef provider fill:#1f2430,stroke:#fb7185,stroke-width:1px,color:#fecdd3,rx:6,ry:6;
+  classDef local fill:#111827,stroke:#a78bfa,stroke-width:1px,color:#ddd6fe,rx:6,ry:6;
+  classDef edgeNote stroke-dasharray: 4 3,color:#a1a1aa,font-size:12px;
+
+  %% ===== ① Client =====
+  subgraph CLIENT["① Client / SDK"]
+    direction TB
+    U["👤 Web Client<br/>REST · X-API-Key"]:::entry
+    LC["🧰 LangChain / SDK<br/>OpenAI-Compatible → /v1"]:::entry
   end
   class CLIENT grp
 
-  subgraph APIGW["② API Gateway (9800)<br/>— Auth / Routing / Orchestration —"]
+  %% ===== ② API Gateway =====
+  subgraph APIGW["② API Gateway(9800)"]
+    direction TB
+    GW_V1C["/v1/chat/completions"]:::box
+    GW_V1E["/v1/embeddings"]:::box
     GW_CHAT["/chat"]:::box
-    GW_RETRIEVE["/retrieve  /search"]:::box
+    GW_RETRIEVE["/retrieve  ·  /search"]:::box
     GW_INDEX["/index/chunks"]:::box
     GW_GRAPH["/graph/*"]:::box
-    GW_EMBED["/embed"]:::box
     GW_RERANK["/rerank"]:::box
   end
   class APIGW grp
 
-  subgraph ING["③ Ingestor (9900)<br/>— Document Ingest / Chunking —"]
+  %% ===== ③ Ingestion =====
+  subgraph ING["③ Ingestion Service(9900)"]
+    direction TB
     ING_RUN["ingest/directory<br/>CLI / API"]:::box
   end
   class ING grp
 
-  subgraph LLMCORE["④ LiteLLM Proxy (9400)<br/>— Model Routing / TokenCap / UI —"]
-    LC_TC["🧱 TokenCap / Routing Policies"]:::core
-    LC_UI["📊 Dashboard UI"]:::core
-    LLM_BUS["🔀 OpenAI-Compatible Router"]:::core
-    REDIS["🧮 Redis 6379<br/>Cache / Token Counters"]:::store
+  %% ===== ④ LLM Core =====
+  subgraph LLMCORE["④LiteLLM(9400)"]
+    direction TB
+    LLM_V1["🔀 OpenAI-Compatible Router<br/>(/v1/* internal)"]:::core
+    LC_TC["🧱 TokenCap · Routing Logic"]:::core
+    LC_UI["📊 Dashboard UI (internal)"]:::core
+    REDIS["🧮 Redis 6379<br/>Cache / Token Counter"]:::store
   end
   class LLMCORE grp
 
+  %% ===== ⑤ Local Inference =====
   subgraph LOCAL["⑤ Local Inference"]
-    OLLAMA["🧩 Ollama (bge-m3)<br/>Embeddings"]:::local
-    RERANK["↕️ bge-reranker-v2-m3<br/>Reranker"]:::local
+    direction LR
+    OLLAMA["🧩 Ollama (bge-m3)<br/>Embeddings Generator"]:::local
+    RERANK["↕️ bge-reranker-v2-m3<br/>Result Reranker"]:::local
   end
   class LOCAL grp
 
-  subgraph STORAGE["⑥ Storage / Databases"]
-    QDRANT["🗂 Qdrant 6333<br/>Vector Index"]:::store
+  %% ===== ⑥ Storage =====
+  subgraph STORAGE["⑥ Storage & Databases"]
+    direction LR
+    QDRANT["🗂 Qdrant 6333<br/>Vector Index Store"]:::store
     NEO4J["🕸 Neo4j 7474/7687<br/>Knowledge Graph"]:::store
-    PG["📇 Postgres 5432<br/>Metadata / Logs"]:::store
+    PG["📇 Postgres 5432<br/>Metadata · Logs"]:::store
   end
   class STORAGE grp
 
+  %% ===== ⑦ Providers =====
   subgraph PROVIDERS["⑦ Cloud Model Providers"]
+    direction LR
     OAI["OpenAI"]:::provider
     GGM["Google Gemini"]:::provider
     OPR["OpenRouter"]:::provider
@@ -170,36 +214,44 @@ flowchart LR
   end
   class PROVIDERS grp
 
+  %% ===== External Links =====
   U -->|"REST (X-API-Key)"| APIGW
-  LC -->|"OpenAI-Compatible"| LLMCORE
+  LC -->|"OpenAI-Compatible (/v1/*)"| APIGW
 
-  ING_RUN -->|"call /index/chunks"| GW_INDEX
-  ING_RUN -.->|"bulk"| QDRANT:::edgeNote
+  %% ===== Ingestion & Indexing =====
+  ING_RUN -->|"POST /index/chunks"| GW_INDEX
+  ING_RUN -.->|"Bulk Write"| QDRANT:::edgeNote
 
-  GW_CHAT -->|"chat / tools"| LLM_BUS
-  GW_RETRIEVE -->|"retrieve"| QDRANT
-  GW_RETRIEVE -->|"graph query"| NEO4J
-  GW_INDEX -->|"chunk → embed"| GW_EMBED
-  GW_EMBED -->|"local embeddings"| OLLAMA
-  GW_INDEX -->|"write vectors/meta"| QDRANT
-  GW_INDEX -->|"write metadata"| PG
-  GW_RERANK -->|"rerank request"| RERANK
-  GW_GRAPH -->|"upsert / query"| NEO4J
-  APIGW -->|"ops logs"| PG
+  %% ===== Gateway Internal Routing =====
+  GW_V1C -->|"intra /v1/chat/completions"| LLM_V1
+  GW_V1E -->|"intra /v1/embeddings"| LLM_V1
+  GW_CHAT -->|"Chat / Tool Calls → /v1"| LLM_V1
+  GW_RETRIEVE -->|"Vector Query"| QDRANT
+  GW_RETRIEVE -->|"Graph Query"| NEO4J
+  GW_INDEX -->|"Chunk → Embed"| GW_V1E
+  GW_V1E -->|"Local Embeddings"| OLLAMA
+  GW_INDEX -->|"Write Vectors + Metadata"| QDRANT
+  GW_INDEX -->|"Write Metadata"| PG
+  GW_RERANK -->|"Rerank Request"| RERANK
+  GW_GRAPH -->|"Upsert / Query"| NEO4J
+  APIGW -->|"Ops Logs"| PG
 
-  LLM_BUS --> OLLAMA
-  LLM_BUS --> LC_TC
-  LLM_BUS --> LC_UI
-  LLM_BUS --> OAI
-  LLM_BUS --> GGM
-  LLM_BUS --> OPR
-  LLM_BUS --> GRQ
+  %% ===== LLM Core ↔ Providers =====
+  LLM_V1 --> LC_TC
+  LLM_V1 --> LC_UI
+  LLM_V1 --> OLLAMA
+  LLM_V1 --> OAI
+  LLM_V1 --> GGM
+  LLM_V1 --> OPR
+  LLM_V1 --> GRQ
   LLMCORE --> REDIS
 
-  QDRANT -.->|"retrieved docs"| RERANK:::edgeNote
-  RERANK -.->|"Top-K ranked"| LLM_BUS:::edgeNote
-  LLM_BUS -.->|"final answer"| APIGW:::edgeNote
-  APIGW -.->|"response"| U:::edgeNote
+  %% ===== Response Flow =====
+  QDRANT -.->|"Hits"| RERANK:::edgeNote
+  RERANK -.->|"Top-K Results"| LLM_V1:::edgeNote
+  LLM_V1 -.->|"Final Answer (internal)"| APIGW:::edgeNote
+  APIGW -.->|"Response"| U:::edgeNote
+
 ```
 
 > Tip: connect **LangChain** directly to LiteLLM (port **9400**). End-user app flows go through the **API Gateway** (port **9800**).
@@ -402,28 +454,41 @@ The **canonical** API reference (endpoints, request/response shapes, models) liv
 
 ## API (Quick Examples)
 
-**LiteLLM (OpenAI-compatible) — Base `http://localhost:9400/v1`**
+**Recommended: use API Gateway's OpenAI-compatible /v1 for external SDKs**
 
-Python (LangChain):
+For external applications and official/compatible SDKs (OpenAI SDK, LangChain, etc.), we recommend pointing your client to the Gateway's OpenAI-compatible endpoint: `http://localhost:9800/v1` and use the Gateway API Key (`dev-key` in dev). The Gateway provides unified auth, routing, TokenCap (cost protection), and observability.
+
+Python (LangChain / OpenAI-compatible client, recommended):
 
 ```python
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-llm = ChatOpenAI(base_url="http://localhost:9400/v1", api_key="sk-admin",
+llm = ChatOpenAI(base_url="http://localhost:9800/v1", api_key="dev-key",
                  model="rag-answer", temperature=0.2)
-emb = OpenAIEmbeddings(base_url="http://localhost:9400/v1", api_key="sk-admin",
+emb = OpenAIEmbeddings(base_url="http://localhost:9800/v1", api_key="dev-key",
                        model="local-embed")
 
 print(llm.invoke("Explain RAG in three lines").content)
 print(len(emb.embed_query("Key differences between GraphRAG and RAG")))
 ```
 
-cURL:
+cURL (recommended via Gateway):
 
 ```bash
+curl -s http://localhost:9800/v1/chat/completions \
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
+  -d '{"model":"rag-answer","messages":[{"role":"user","content":"List three advantages of RAG"}]}' | jq
+```
+
+**Note: direct LiteLLM access (internal / testing only)**
+
+If you're an internal developer or performing low-level tests, you can still connect directly to LiteLLM's OpenAI-compatible endpoint at `http://localhost:9400/v1` using the admin key (`sk-admin`). Avoid exposing this key to end-users. Example:
+
+```bash
+# Direct to LiteLLM (dev/test only)
 curl -s http://localhost:9400/v1/chat/completions \
   -H "Authorization: Bearer sk-admin" -H "Content-Type: application/json" \
-  -d '{"model":"rag-answer","messages":[{"role":"user","content":"List three advantages of RAG"}]}'
+  -d '{"model":"rag-answer","messages":[{"role":"user","content":"List three advantages of RAG"}]}' | jq
 ```
 
 **API Gateway — Base `http://localhost:9800` (X-API-Key)**
