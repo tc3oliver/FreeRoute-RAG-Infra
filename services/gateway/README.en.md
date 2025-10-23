@@ -100,7 +100,7 @@ export GRAPH_SCHEMA_PATH="/app/schemas/graph_schema.json"
 export API_GATEWAY_KEYS="dev-key,prod-key-123"
 
 # Optional
-export APP_VERSION="v0.2.0"
+export APP_VERSION="v0.2.1"
 export LOG_LEVEL="INFO"
 export GRAPH_MIN_NODES="1"
 export GRAPH_MIN_EDGES="1"
