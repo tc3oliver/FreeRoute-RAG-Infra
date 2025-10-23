@@ -290,6 +290,41 @@ def test_chat(base: str, headers: Dict[str, str]) -> bool:
         return False
 
 
+def test_openai_style_endpoints(base: str, headers: Dict[str, str]) -> bool:
+    """Test OpenAI-style endpoints if available: /v1/chat/completions and /v1/embeddings"""
+    try:
+        # Chat completions
+        chat_payload = {"model": "rag-answer", "messages": [{"role": "user", "content": "Hello"}]}
+        r = requests.post(f"{base}/v1/chat/completions", headers=headers, json=chat_payload, timeout=60)
+        if r.status_code == 200:
+            data = ensure_ok(r)
+            if ("choices" in data) or (data.get("ok") is True and "data" in data):
+                log_test("POST /v1/chat/completions", "PASS", "Compatible response")
+            else:
+                log_test("POST /v1/chat/completions", "FAIL", "Unexpected shape")
+                return False
+        else:
+            log_test("POST /v1/chat/completions", "SKIP", f"Status {r.status_code}")
+
+        # Embeddings
+        emb_payload = {"model": "local-embed", "input": ["What is RAG?", "Describe RAG"]}
+        r = requests.post(f"{base}/v1/embeddings", headers=headers, json=emb_payload, timeout=60)
+        if r.status_code == 200:
+            data = ensure_ok(r)
+            if ("data" in data) or ("embeddings" in data) or (data.get("ok") is True and "vectors" in data):
+                log_test("POST /v1/embeddings", "PASS", "Compatible response")
+            else:
+                log_test("POST /v1/embeddings", "FAIL", "Unexpected shape")
+                return False
+        else:
+            log_test("POST /v1/embeddings", "SKIP", f"Status {r.status_code}")
+
+        return True
+    except Exception as e:
+        log_test("OpenAI-style endpoints", "FAIL", f"Exception: {e}")
+        return False
+
+
 def test_embed(base: str, headers: Dict[str, str]) -> bool:
     """Test /embed endpoint."""
     try:
@@ -559,6 +594,8 @@ def run_all_tests(
         all_passed &= test_chat(base, headers)
         time.sleep(0.1)
         all_passed &= test_embed(base, headers)
+        time.sleep(0.1)
+        all_passed &= test_openai_style_endpoints(base, headers)
         time.sleep(0.1)
         all_passed &= test_rerank(base, headers)
         print()
