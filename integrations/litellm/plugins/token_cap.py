@@ -15,7 +15,7 @@ import datetime
 import json
 import logging
 import os
-from typing import TYPE_CHECKING, Any, Dict, Literal, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Dict, Literal, Optional, cast
 
 # === 第三方套件 ===
 import redis.asyncio as redis
@@ -142,8 +142,17 @@ async def _try_redis_connect(url: str, retries: int = 3, delay: float = 0.5) -> 
         try:
             # from_url returns a client instance (not a coroutine)
             r: redis.Redis = redis.from_url(url, decode_responses=True)
-            # Verify connection
-            await r.ping()
+            # Verify connection. Some redis client implementations may expose
+            # `ping()` as either a coroutine or a synchronous function that
+            # returns bool. To satisfy static typing we check the return value
+            # and only await when it's awaitable.
+            ping_result = r.ping()
+            if isinstance(ping_result, bool):
+                # if the synchronous ping returned False, treat as failure
+                if not ping_result:
+                    raise RuntimeError("redis ping returned False")
+            else:
+                await cast(Awaitable[bool], ping_result)
             return r
         except Exception as e:
             logger.debug("[TokenCap] redis connect attempt %s failed: %s", attempt, e)
