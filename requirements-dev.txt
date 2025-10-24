@@ -13,7 +13,7 @@ types-requests
 # Formatters / linters (for dev installs only; pre-commit installs their pinned versions)
 ruff
 black==24.8.0
-isort==5.13.2
+isort==7.0.0
 
 # Multi-tenant support (required for tests)
 bcrypt
