@@ -390,7 +390,7 @@ def test_index_chunks(base: str, headers: Dict[str, str]) -> bool:
                     "metadata": {"source": "test_doc", "chunk_id": "chunk_2"},
                 },
             ],
-            "collection_name": TEST_COLLECTION,
+            "collection": TEST_COLLECTION,
         }
         r = requests.post(f"{base}/index/chunks", headers=headers, json=payload, timeout=60)
         data = ensure_ok(r)
@@ -409,7 +409,7 @@ def test_index_chunks(base: str, headers: Dict[str, str]) -> bool:
 def test_search(base: str, headers: Dict[str, str]) -> bool:
     """Test /search endpoint."""
     try:
-        payload = {"query": "測試資訊", "collection_name": TEST_COLLECTION, "top_k": 5}
+        payload = {"query": "測試資訊", "collection": TEST_COLLECTION, "top_k": 5}
         r = requests.post(f"{base}/search", headers=headers, json=payload, timeout=60)
         data = ensure_ok(r)
         # Accept both results and hits
@@ -428,7 +428,7 @@ def test_search(base: str, headers: Dict[str, str]) -> bool:
 def test_retrieve(base: str, headers: Dict[str, str]) -> bool:
     """Test /retrieve endpoint (hybrid retrieval)."""
     try:
-        payload = {"query": "測試", "collection_name": TEST_COLLECTION, "top_k": 3, "use_graph": False}
+        payload = {"query": "測試", "collection": TEST_COLLECTION, "top_k": 3, "use_graph": False}
         r = requests.post(f"{base}/retrieve", headers=headers, json=payload, timeout=60)
         data = ensure_ok(r)
         # Accept both results and hits

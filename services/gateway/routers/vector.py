@@ -18,13 +18,15 @@ async def get_async_vector_service() -> AsyncVectorService:
     return AsyncVectorService()
 
 
-@router.post("/index/chunks", dependencies=[Depends(require_key)], response_model=IndexChunksResp)
+@router.post("/index/chunks", response_model=IndexChunksResp)
 async def index_chunks(
-    req: IndexChunksReq, service: AsyncVectorService = Depends(get_async_vector_service)
+    req: IndexChunksReq,
+    tenant_id: str = Depends(require_key),
+    service: AsyncVectorService = Depends(get_async_vector_service),
 ) -> Dict[str, Any]:
     """Index text chunks into Qdrant vector database (asynchronous)."""
     try:
-        return await service.index_chunks(req)
+        return await service.index_chunks(req, tenant_id=tenant_id)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except RuntimeError as re:
@@ -36,11 +38,15 @@ async def index_chunks(
         raise HTTPException(status_code=502, detail=f"index_error: {e}")
 
 
-@router.post("/search", dependencies=[Depends(require_key)], response_model=SearchResp)
-async def search(req: SearchReq, service: AsyncVectorService = Depends(get_async_vector_service)) -> Dict[str, Any]:
+@router.post("/search", response_model=SearchResp)
+async def search(
+    req: SearchReq,
+    tenant_id: str = Depends(require_key),
+    service: AsyncVectorService = Depends(get_async_vector_service),
+) -> Dict[str, Any]:
     """Vector similarity search (asynchronous)."""
     try:
-        return await service.search(req)
+        return await service.search(req, tenant_id=tenant_id)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except RuntimeError as re:
@@ -49,14 +55,21 @@ async def search(req: SearchReq, service: AsyncVectorService = Depends(get_async
         import logging
 
         logging.getLogger("gateway").exception("/search error")
+        # Qdrant collection 不存在時，回傳空 hits
+        if "doesn't exist" in str(e) or "Not found: Collection" in str(e):
+            return {"hits": [], "ok": True, "detail": "collection not found"}
         raise HTTPException(status_code=502, detail=f"search_error: {e}")
 
 
-@router.post("/retrieve", dependencies=[Depends(require_key)], response_model=RetrieveResp)
-async def retrieve(req: RetrieveReq, service: AsyncVectorService = Depends(get_async_vector_service)) -> Dict[str, Any]:
+@router.post("/retrieve", response_model=RetrieveResp)
+async def retrieve(
+    req: RetrieveReq,
+    tenant_id: str = Depends(require_key),
+    service: AsyncVectorService = Depends(get_async_vector_service),
+) -> Dict[str, Any]:
     """Hybrid retrieval: vector search + graph neighborhood expansion (asynchronous)."""
     try:
-        return await service.retrieve(req)
+        return await service.retrieve(req, tenant_id=tenant_id)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:

@@ -97,7 +97,14 @@ curl -s -H "X-API-Key: dev-key" http://localhost:9800/whoami | jq
 
 ## API Gateway（Base：`http://localhost:9800`）
 
-**Auth**：`X-API-Key: <key>`（或 Bearer）
+**認證要求**：所有 Gateway API 端點（包含 `/v1` OpenAI 風格、`/index/chunks`、`/search`、`/retrieve`、`/chat`、`/embed`、`/rerank`、`/graph/*` 等）都必須在 HTTP Header 帶上租戶 API Key。
+
+格式如下：
+
+- `X-API-Key: sk-{tenant_id}-...`
+- 或 `Authorization: Bearer sk-{tenant_id}-...`
+
+（開發預設金鑰為 `dev-key`，正式環境請由管理員建立租戶並分配金鑰）
 
 ### 使用 OpenAI SDK 指向 Gateway 的 /v1（OpenAI 風格）
 

@@ -21,6 +21,8 @@ def main():
     parser.add_argument("--chunk-overlap", type=int, default=200, help="切分重疊")
     parser.add_argument("--no-graph", action="store_true", help="不抽取知識圖譜")
     parser.add_argument("--force", action="store_true", help="強制重新處理")
+    parser.add_argument("--api-key", type=str, default=None, help="Gateway API Key (推薦，會自動推斷 tenant)")
+    parser.add_argument("--tenant-id", type=str, default=None, help="Tenant ID (可選，若未指定則自動從 API key 推斷)")
 
     args = parser.parse_args()
 
@@ -39,6 +41,9 @@ def main():
         "extract_graph": not args.no_graph,
         "force_reprocess": args.force,
     }
+    # 傳遞 tenant_id 給 ingestor service
+    if args.tenant_id:
+        data["tenant_id"] = args.tenant_id
 
     print(f"開始匯入目錄：{args.path}")
     print(f"檔案模式：{args.file_patterns}")
@@ -47,10 +52,15 @@ def main():
     print()
 
     try:
+        # 準備 header
+        headers = {}
+        if args.api_key:
+            headers["X-API-Key"] = args.api_key
         # 呼叫 API
         response = requests.post(
             f"{args.ingestor_url}/ingest/directory",
             json=data,
+            headers=headers,
             timeout=300,  # 5分鐘超時
         )
         response.raise_for_status()
@@ -78,7 +88,6 @@ def main():
                 print(f"  ✗ {error['file']} ({error['stage']}): {error['error']}")
             if len(result["errors"]) > 5:
                 print(f"  ... 及其他 {len(result['errors']) - 5} 個錯誤")
-
     except requests.RequestException as e:
         print(f"API 呼叫失敗：{e}")
         sys.exit(1)

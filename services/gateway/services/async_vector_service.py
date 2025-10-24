@@ -26,6 +26,13 @@ from ..utils import sha1
 
 
 class AsyncVectorService:
+    async def delete_vector(self, collection: str, tenant_id: str = "default") -> dict:
+        """Delete a vector collection for a tenant."""
+        await self._ensure_clients()
+        collection_name = f"{collection}_{tenant_id}"
+        await self.qdrant_client.delete_collection(collection_name)
+        return {"ok": True, "collection": collection_name}
+
     """
     Service for vector indexing, search, and hybrid retrieval (asynchronous).
 
@@ -50,12 +57,15 @@ class AsyncVectorService:
         if self.neo4j_driver is None:
             self.neo4j_driver = await get_async_neo4j_driver()
 
-    async def index_chunks(self, req: IndexChunksReq) -> Dict[str, Any]:
+    async def index_chunks(self, req: IndexChunksReq, tenant_id: str = "default") -> Dict[str, Any]:
         """
         Index text chunks into Qdrant vector database (asynchronous).
 
+        Supports tenant isolation: chunks are indexed into tenant-specific collection.
+
         Args:
             req: Index request with chunks and collection name
+            tenant_id: Tenant identifier for isolation (default: "default")
 
         Returns:
             Dict with 'ok', 'upserted', 'dim', and 'collection' keys
@@ -71,8 +81,10 @@ class AsyncVectorService:
         vectors = [d.embedding for d in emb.data]
         dim = len(vectors[0]) if vectors else 0
 
-        # 2) Upsert to Qdrant
-        await ensure_qdrant_collection_async(self.qdrant_client, req.collection, dim)
+        # 2) Upsert to Qdrant (tenant-aware collection)
+        actual_collection = await ensure_qdrant_collection_async(
+            self.qdrant_client, req.collection, dim, tenant_id=tenant_id
+        )
 
         import importlib
 
@@ -96,18 +108,28 @@ class AsyncVectorService:
                 "text": c.text,
                 "metadata": c.metadata or {},
                 "hash": sha1(c.text),
+                "tenant_id": tenant_id,  # Add tenant_id to payload for filtering
             }
             points.append(PointStruct(id=pid, vector=vec, payload=payload))
 
-        await self.qdrant_client.upsert(collection_name=req.collection, points=points)
-        return {"ok": True, "upserted": len(points), "dim": dim, "collection": req.collection}
+        await self.qdrant_client.upsert(collection_name=actual_collection, points=points)
+        return {
+            "ok": True,
+            "upserted": len(points),
+            "dim": dim,
+            "collection": actual_collection,
+            "tenant_id": tenant_id,
+        }
 
-    async def search(self, req: SearchReq) -> Dict[str, Any]:
+    async def search(self, req: SearchReq, tenant_id: str = "default") -> Dict[str, Any]:
         """
         Vector similarity search (asynchronous).
 
+        Supports tenant isolation: searches only in tenant-specific collection.
+
         Args:
             req: Search request with query and filters
+            tenant_id: Tenant identifier for isolation (default: "default")
 
         Returns:
             Dict with 'ok' and 'hits' keys
@@ -122,18 +144,23 @@ class AsyncVectorService:
         emb = await self.llm_client.embeddings.create(model="local-embed", input=[req.query])
         qvec = emb.data[0].embedding
 
-        # Search Qdrant
+        # Search Qdrant (tenant-aware collection)
         import importlib
 
         models_mod = importlib.import_module("qdrant_client.models")
         Filter = getattr(models_mod, "Filter")
+
+        # Import get_tenant_collection_name
+        from ..repositories import get_tenant_collection_name
+
+        actual_collection = get_tenant_collection_name(tenant_id, req.collection)
 
         flt = None
         if req.filters:
             flt = Filter.from_dict(req.filters)
 
         results = await self.qdrant_client.search(
-            collection_name=req.collection, query_vector=qvec, limit=req.top_k, query_filter=flt
+            collection_name=actual_collection, query_vector=qvec, limit=req.top_k, query_filter=flt
         )
 
         hits = []
@@ -142,15 +169,18 @@ class AsyncVectorService:
 
         return {"ok": True, "hits": hits}
 
-    async def retrieve(self, req: RetrieveReq) -> Dict[str, Any]:
+    async def retrieve(self, req: RetrieveReq, tenant_id: str = "default") -> Dict[str, Any]:
         """
         Hybrid retrieval: vector search + graph neighborhood expansion (asynchronous).
 
         This method provides significant performance improvement by running
         vector search and graph expansion in parallel using asyncio.gather().
 
+        Supports tenant isolation: searches only in tenant-specific data.
+
         Args:
             req: Retrieve request with query and options
+            tenant_id: Tenant identifier for isolation (default: "default")
 
         Returns:
             Dict with 'ok', 'hits', 'subgraph', and 'query_time_ms' keys
@@ -166,11 +196,11 @@ class AsyncVectorService:
         tasks = []
 
         # Task 1: Vector search
-        tasks.append(self._vector_search(req))
+        tasks.append(self._vector_search(req, tenant_id))
 
         # Task 2: Graph expansion (if requested)
         if req.include_subgraph:
-            tasks.append(self._expand_graph_neighborhood(req.query, req.max_hops))
+            tasks.append(self._expand_graph_neighborhood(req.query, req.max_hops, tenant_id))
         else:
             tasks.append(asyncio.sleep(0))  # Dummy task to maintain index
 
@@ -196,13 +226,17 @@ class AsyncVectorService:
             "query_time_ms": query_time,
         }
 
-    async def _vector_search(self, req: RetrieveReq) -> List[RetrieveHit]:
+    async def _vector_search(self, req: RetrieveReq, tenant_id: str = "default") -> List[RetrieveHit]:
         """Execute vector search and return hits."""
         try:
             emb = await self.llm_client.embeddings.create(model="local-embed", input=[req.query])
             qvec = emb.data[0].embedding
 
             import importlib
+
+            from ..repositories import get_tenant_collection_name
+
+            actual_collection = get_tenant_collection_name(tenant_id, req.collection)
 
             models_mod = importlib.import_module("qdrant_client.models")
             Filter = getattr(models_mod, "Filter")
@@ -212,7 +246,7 @@ class AsyncVectorService:
                 flt = Filter.from_dict(req.filters)
 
             results = await self.qdrant_client.search(
-                collection_name=req.collection, query_vector=qvec, limit=req.top_k, query_filter=flt
+                collection_name=actual_collection, query_vector=qvec, limit=req.top_k, query_filter=flt
             )
 
             hits = []
@@ -231,24 +265,27 @@ class AsyncVectorService:
         except Exception:
             return []  # Return empty list on error
 
-    async def _expand_graph_neighborhood(self, query: str, max_hops: int) -> Subgraph | None:
-        """Expand graph neighborhood based on query keywords (asynchronous)."""
+    async def _expand_graph_neighborhood(
+        self, query: str, max_hops: int, tenant_id: str = "default"
+    ) -> Subgraph | None:
+        """Expand graph neighborhood based on query keywords (asynchronous with tenant isolation)."""
         try:
             query_keywords = [kw.strip() for kw in query.lower().split() if len(kw.strip()) > 2]
 
             async with self.neo4j_driver.session() as session:
-                # Find relevant nodes
+                # Find relevant nodes (tenant-aware)
                 match_nodes = []
                 for keyword in query_keywords[:3]:
                     result = await session.run(
                         """
-                        MATCH (n)
+                        MATCH (n {tenant_id: $tenant_id})
                         WHERE toLower(n.id) CONTAINS $keyword
                            OR ANY(prop IN keys(n) WHERE toLower(toString(n[prop])) CONTAINS $keyword)
                         RETURN DISTINCT n.id as id, n.type as type, properties(n) as props
                         LIMIT 5
                     """,
                         keyword=keyword,
+                        tenant_id=tenant_id,
                     )
                     records = [record async for record in result]
                     match_nodes.extend([r.data() for r in records])
@@ -269,7 +306,7 @@ class AsyncVectorService:
                     node_id = node["id"]
                     result = await session.run(
                         f"""
-                        MATCH (a {{id: $id}})-[r]-(b)
+                        MATCH (a {{id: $id, tenant_id: $tenant_id}})-[r]-(b {{tenant_id: $tenant_id}})
                         RETURN
                             a.id as src_id, a.type as src_type, properties(a) as src_props,
                             type(r) as rel_type, properties(r) as rel_props,
@@ -278,6 +315,7 @@ class AsyncVectorService:
                         LIMIT {max_hops * 10}
                     """,
                         id=node_id,
+                        tenant_id=tenant_id,
                     )
 
                     records = [record async for record in result]
@@ -319,3 +357,23 @@ class AsyncVectorService:
             pass  # Return None if graph expansion fails
 
         return None
+
+    async def delete(self, req, tenant_id: str = "default") -> int:
+        """
+        刪除向量資料（支援多租戶、collection、doc_id 粒度）
+        """
+        await self._ensure_clients()
+        from ..repositories import get_tenant_collection_name
+
+        collection = get_tenant_collection_name(tenant_id, req.collection)
+        if req.doc_id:
+            # 刪除指定 doc_id
+            res = await self.qdrant_client.delete(
+                collection_name=collection,
+                points_selector={"filter": {"must": [{"key": "doc_id", "match": {"value": req.doc_id}}]}},
+            )
+            return res.get("result", {}).get("operation_id", 1)  # 回傳刪除數量或 1
+        else:
+            # 刪除整個 collection
+            await self.qdrant_client.delete_collection(collection_name=collection)
+            return 1

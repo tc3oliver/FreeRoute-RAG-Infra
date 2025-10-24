@@ -126,7 +126,7 @@ class AsyncGraphService:
         else:
             return {"ok": True, "mode": "text", "text": txt, "provider": provider}
 
-    async def extract(self, req: GraphReq, client_ip: str) -> Dict[str, Any]:
+    async def extract(self, req: GraphReq, client_ip: str, tenant_id: str = "default") -> Dict[str, Any]:
         """
         Extract graph data from text using parallel provider attempts (asynchronous).
 
@@ -137,6 +137,7 @@ class AsyncGraphService:
         Args:
             req: Graph extraction request
             client_ip: Client IP for tracking
+            tenant_id: Tenant ID for data isolation
 
         Returns:
             Dict with 'ok', 'data', 'provider', 'schema_hash' keys
@@ -360,12 +361,13 @@ class AsyncGraphService:
 
         return {"data": data, "provider": resp.model, "raw": raw}
 
-    async def upsert(self, req: GraphUpsertReq) -> Dict[str, Any]:
+    async def upsert(self, req: GraphUpsertReq, tenant_id: str = "default") -> Dict[str, Any]:
         """
         Upsert graph nodes and edges into Neo4j (asynchronous).
 
         Args:
             req: Upsert request with graph data
+            tenant_id: Tenant ID for data isolation
 
         Returns:
             Dict with 'ok', 'nodes', and 'edges' counts
@@ -380,27 +382,28 @@ class AsyncGraphService:
         e_count = 0
 
         async with self.neo4j_driver.session() as session:
-            # Upsert nodes
+            # Upsert nodes with tenant_id
             for n in data.nodes:
                 await session.run(
                     """
-                    MERGE (x:Entity:`%s` {id: $id})
+                    MERGE (x:Entity:`%s` {id: $id, tenant_id: $tenant_id})
                     ON CREATE SET x.created_at = timestamp()
                     SET x.updated_at = timestamp(), x.type = $type, x.props_json = $props
                     """
                     % n.type,
                     id=n.id,
+                    tenant_id=tenant_id,
                     type=n.type,
                     props=_props_json(n.props),
                 )
                 n_count += 1
 
-            # Upsert edges
+            # Upsert edges with tenant_id filtering
             for e in data.edges:
                 await session.run(
                     """
-                    MATCH (a {id: $src})
-                    MATCH (b {id: $dst})
+                    MATCH (a {id: $src, tenant_id: $tenant_id})
+                    MATCH (b {id: $dst, tenant_id: $tenant_id})
                     MERGE (a)-[r:`%s`]->(b)
                     ON CREATE SET r.created_at = timestamp()
                     SET r.updated_at = timestamp(), r.type = $type, r.props_json = $props
@@ -408,6 +411,7 @@ class AsyncGraphService:
                     % e.type,
                     src=e.src,
                     dst=e.dst,
+                    tenant_id=tenant_id,
                     type=e.type,
                     props=_props_json(e.props),
                 )
@@ -415,12 +419,13 @@ class AsyncGraphService:
 
         return {"ok": True, "nodes": n_count, "edges": e_count}
 
-    async def query(self, req: GraphQueryReq) -> Dict[str, Any]:
+    async def query(self, req: GraphQueryReq, tenant_id: str = "default") -> Dict[str, Any]:
         """
         Execute a read-only Cypher query on Neo4j (asynchronous).
 
         Args:
             req: Query request with Cypher and params
+            tenant_id: Tenant ID for data isolation
 
         Returns:
             Dict with 'ok' and 'records' keys
@@ -437,9 +442,13 @@ class AsyncGraphService:
 
         await self._ensure_neo4j()
 
+        # Inject tenant_id into query params for tenant isolation
+        params = req.params or {}
+        params["tenant_id"] = tenant_id
+
         records = []
         async with self.neo4j_driver.session() as session:
-            result = await session.run(q, **(req.params or {}))
+            result = await session.run(q, **params)
             records = [record.data() async for record in result]
 
         return {"ok": True, "records": records}
@@ -482,3 +491,32 @@ class AsyncGraphService:
             return False
         except Exception:
             return False
+
+    async def delete(self, req, tenant_id: str = "default") -> int:
+        """
+        刪除圖譜資料（支援多租戶、doc_id 粒度）
+        """
+        await self._ensure_neo4j()
+        driver = self.neo4j_driver
+        if req.doc_id:
+            # 刪除指定 doc_id 相關的所有節點與邊
+            query = """
+            MATCH (n {doc_id: $doc_id, tenant_id: $tenant_id})
+            DETACH DELETE n
+            RETURN count(n) as deleted_count
+            """
+            async with driver.session() as session:
+                result = await session.run(query, doc_id=req.doc_id, tenant_id=tenant_id)
+                record = await result.single()
+                return record["deleted_count"] if record else 0
+        else:
+            # 刪除整個 tenant 的所有節點
+            query = """
+            MATCH (n {tenant_id: $tenant_id})
+            DETACH DELETE n
+            RETURN count(n) as deleted_count
+            """
+            async with driver.session() as session:
+                result = await session.run(query, tenant_id=tenant_id)
+                record = await result.single()
+                return record["deleted_count"] if record else 0
