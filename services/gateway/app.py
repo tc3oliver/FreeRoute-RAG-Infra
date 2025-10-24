@@ -19,7 +19,7 @@ from .repositories import (
     close_async_qdrant_client,
     get_async_litellm_client,
 )
-from .routers import chat, graph, meta, vector
+from .routers import admin, chat, delete, graph, meta, vector
 from .routers.meta import health, version, whoami  # noqa: F401
 from .utils import dedup_merge_nodes as _dedup_merge_nodes  # noqa: F401
 from .utils import ensure_json_hint as _ensure_json_hint
@@ -34,10 +34,24 @@ from .utils import sha1 as _sha1
 # === FastAPI lifespan：確保關閉非同步客戶端資源 ===
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
+    # Startup: connect to tenant DB
+    from .db.connection import connect_tenant_db
+
+    try:
+        await connect_tenant_db()
+    except Exception as e:
+        logger.error(f"Failed to connect to tenant DB: {e}")
+
     try:
         yield
     finally:
-        # 儘管路由已全面改為非同步，仍可能有背景資源需要釋放
+        # Shutdown: disconnect from all resources
+        from .db.connection import disconnect_tenant_db
+
+        try:
+            await disconnect_tenant_db()
+        except Exception:
+            pass
         try:
             await close_async_litellm_client()
         except Exception:
@@ -85,6 +99,12 @@ app.include_router(meta.router)
 app.include_router(chat.router)
 app.include_router(vector.router)
 app.include_router(graph.router)
+app.include_router(delete.router)
+
+# === Admin 路由（tenant 管理）===
+
+
+app.include_router(admin.router)
 
 # === Backward compatibility: Re-export route handlers for tests ===
 # Alias handlers from already-imported router modules to avoid late imports

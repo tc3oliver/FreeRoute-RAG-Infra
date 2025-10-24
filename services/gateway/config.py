@@ -51,7 +51,7 @@ ENV_PROVIDER_CHAIN: List[str] = [
 ]
 PROVIDER_CHAIN: List[str] = ENV_PROVIDER_CHAIN if ENV_PROVIDER_CHAIN else DEFAULT_PROVIDER_CHAIN
 
-APP_VERSION = os.environ.get("APP_VERSION", "v0.2.1")
+APP_VERSION = os.environ.get("APP_VERSION", "v0.2.2")
 
 # Entrypoints
 ENTRYPOINTS = {"rag-answer", "graph-extractor"}

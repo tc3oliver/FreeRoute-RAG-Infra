@@ -1,5 +1,5 @@
 """
-Neo4j graph database driver wrapper.
+Neo4j graph database driver wrapper with tenant isolation.
 """
 
 import importlib
@@ -30,6 +30,31 @@ async def get_async_neo4j_driver() -> Any:
         except Exception as e:
             raise RuntimeError(f"neo4j_unavailable: {e}")
     return _async_driver
+
+
+async def delete_tenant_nodes_async(driver: Any, tenant_id: str) -> int:
+    """
+    Delete all nodes belonging to a specific tenant from Neo4j.
+
+    Uses tenant_id property for isolation.
+
+    Args:
+        driver: Async Neo4j driver instance
+        tenant_id: Tenant identifier
+
+    Returns:
+        Number of nodes deleted
+    """
+    query = """
+    MATCH (n {tenant_id: $tenant_id})
+    DETACH DELETE n
+    RETURN count(n) as deleted_count
+    """
+
+    async with driver.session() as session:
+        result = await session.run(query, tenant_id=tenant_id)
+        record = await result.single()
+        return record["deleted_count"] if record else 0
 
 
 async def close_async_driver() -> None:

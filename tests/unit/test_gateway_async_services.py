@@ -338,11 +338,11 @@ class TestAsyncVectorService:
         from services.gateway.models import RetrieveHit
 
         # Mock _vector_search to return search results
-        async def mock_vector_search(req):
+        async def mock_vector_search(req, tenant_id, **kwargs):
             return [RetrieveHit(text="Result text", metadata={"chunk_id": "c1"}, citations=[], score=0.95)]
 
         # Mock graph expansion (return None for simplicity)
-        async def mock_expand_graph(query, max_hops):
+        async def mock_expand_graph(query, max_hops, tenant_id, **kwargs):
             return None
 
         with (

@@ -96,7 +96,14 @@ curl -s -H "X-API-Key: dev-key" http://localhost:9800/whoami | jq
 
 ## API Gateway (Base: `http://localhost:9800`)
 
-**Auth**: `X-API-Key: <key>` (or Bearer)
+**Authentication requirement**: All Gateway API endpoints (including `/v1` OpenAI-style, `/index/chunks`, `/search`, `/retrieve`, `/chat`, `/embed`, `/rerank`, `/graph/*`, etc.) require a tenant API Key in the HTTP header.
+
+Format:
+
+- `X-API-Key: sk-{tenant_id}-...`
+- or `Authorization: Bearer sk-{tenant_id}-...`
+
+(Default dev key is `dev-key`; for production, admins must create tenants and assign keys.)
 
 ### Using OpenAI SDK with the Gateway's /v1 (OpenAI-style)
 

@@ -14,13 +14,13 @@ from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urljoin
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 # === 環境變數 ===
 GATEWAY_BASE = os.environ.get("GATEWAY_BASE", "http://apigw:8000").rstrip("/")
 GATEWAY_API_KEY = os.environ.get("GATEWAY_API_KEY", "dev-key")
-APP_VERSION = os.environ.get("APP_VERSION", "v0.2.1")
+APP_VERSION = os.environ.get("APP_VERSION", "v0.2.2")
 
 # 切分參數
 DEFAULT_CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "1000"))
@@ -90,10 +90,14 @@ def _simple_chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) ->
     return [c for c in chunks if c.strip()]
 
 
-def _call_gateway(endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
-    """呼叫 Gateway API"""
+def _call_gateway(endpoint: str, data: Dict[str, Any], api_key: str = None) -> Dict[str, Any]:
+    """呼叫 Gateway API，支援自訂 API key"""
     url = urljoin(GATEWAY_BASE, endpoint)
-    headers = {"X-API-Key": GATEWAY_API_KEY, "Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["X-API-Key"] = api_key
+    else:
+        headers["X-API-Key"] = GATEWAY_API_KEY
 
     try:
         # 圖譜抽取需要更長時間，其他 API 用較短超時
@@ -135,7 +139,7 @@ def health() -> Dict[str, Any]:
 
 
 @app.post("/ingest/directory", response_model=IngestResp)
-def ingest_directory(req: IngestDirReq) -> Dict[str, Any]:
+def ingest_directory(req: IngestDirReq, request: Request) -> Dict[str, Any]:
     """匯入本地目錄"""
     start_time = time.time()
 
@@ -174,6 +178,10 @@ def ingest_directory(req: IngestDirReq) -> Dict[str, Any]:
     # 簡單的處理狀態儲存（實務中應用 Redis 或 DB）
     processed_hashes = set()  # 假設已處理的文件 hash 集合
 
+    # 取得 API key 與 tenant_id
+    api_key = request.headers.get("x-api-key") or request.headers.get("authorization")
+    tenant_id = req.__dict__.get("tenant_id")
+
     for file_path in all_files:
         try:
             # 載入文件
@@ -211,8 +219,12 @@ def ingest_directory(req: IngestDirReq) -> Dict[str, Any]:
                     }
                 )
 
+            index_payload = {"collection": req.collection, "chunks": chunk_data}
+            if tenant_id:
+                index_payload["tenant_id"] = tenant_id
+
             try:
-                index_resp = _call_gateway("/index/chunks", {"collection": req.collection, "chunks": chunk_data})
+                index_resp = _call_gateway("/index/chunks", index_payload, api_key=api_key)
                 stats["chunks_created"] += index_resp.get("upserted", 0)
                 logger.info(f"Indexed {len(chunk_data)} chunks for {doc_id}")
             except Exception as e:
@@ -225,19 +237,22 @@ def ingest_directory(req: IngestDirReq) -> Dict[str, Any]:
                 try:
                     # 對文件進行圖抽取，限制長度並分段處理
                     content_for_graph = content[:3000]  # 進一步限制長度
-                    graph_resp = _call_gateway(
-                        "/graph/extract",
-                        {
-                            "context": content_for_graph,
-                            "strict": False,  # 改為非嚴格模式，容錯性更好
-                            "allow_empty": True,  # 允許空結果
-                            "max_attempts": 1,  # 減少重試次數
-                        },
-                    )
+                    graph_payload = {
+                        "context": content_for_graph,
+                        "strict": False,
+                        "allow_empty": True,
+                        "max_attempts": 1,
+                    }
+                    if tenant_id:
+                        graph_payload["tenant_id"] = tenant_id
+                    graph_resp = _call_gateway("/graph/extract", graph_payload, api_key=api_key)
 
                     # 將抽取的圖譜儲存
                     if graph_resp.get("ok") and graph_resp.get("data"):
-                        upsert_resp = _call_gateway("/graph/upsert", {"data": graph_resp["data"]})
+                        upsert_payload = {"data": graph_resp["data"]}
+                        if tenant_id:
+                            upsert_payload["tenant_id"] = tenant_id
+                        upsert_resp = _call_gateway("/graph/upsert", upsert_payload, api_key=api_key)
                         stats["graphs_extracted"] += 1
                         logger.info(
                             f"Extracted graph for {doc_id}: {upsert_resp.get('nodes', 0)} nodes, {upsert_resp.get('edges', 0)} edges"

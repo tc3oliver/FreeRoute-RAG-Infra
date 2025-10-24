@@ -1,5 +1,5 @@
 """
-Qdrant vector database client wrapper.
+Qdrant vector database client wrapper with tenant isolation.
 """
 
 import importlib
@@ -8,6 +8,23 @@ from typing import Any
 from ..config import QDRANT_URL
 
 _async_client: Any = None
+
+
+def get_tenant_collection_name(tenant_id: str, base_name: str = "vectors") -> str:
+    """
+    Generate tenant-specific collection name.
+
+    Format: {base_name}_{tenant_id}
+    Example: vectors_acme8x
+
+    Args:
+        tenant_id: Tenant identifier
+        base_name: Base collection name (default: "vectors")
+
+    Returns:
+        Tenant-specific collection name
+    """
+    return f"{base_name}_{tenant_id}"
 
 
 async def get_async_qdrant_client() -> Any:
@@ -32,26 +49,57 @@ async def get_async_qdrant_client() -> Any:
     return _async_client
 
 
-async def ensure_qdrant_collection_async(client: Any, name: str, dim: int) -> None:
+async def ensure_qdrant_collection_async(client: Any, name: str, dim: int, tenant_id: str | None = None) -> str:
     """
     Ensure a Qdrant collection exists; create it if missing (asynchronous).
+
+    Supports tenant isolation: if tenant_id is provided, uses tenant-specific collection name.
 
     This is the preferred function for all new code.
 
     Args:
         client: Async Qdrant client instance
-        name: Collection name
+        name: Base collection name
         dim: Vector dimension
+        tenant_id: Optional tenant ID for isolation
+
+    Returns:
+        Actual collection name used (with tenant prefix if applicable)
     """
+    # Generate tenant-specific collection name if tenant_id provided
+    actual_collection = get_tenant_collection_name(tenant_id, name) if tenant_id else name
+
     try:
         models_mod = importlib.import_module("qdrant_client.models")
         Distance = getattr(models_mod, "Distance")
         VectorParams = getattr(models_mod, "VectorParams")
-        await client.get_collection(name)
+        await client.get_collection(actual_collection)
     except Exception:
         await client.recreate_collection(
-            collection_name=name, vectors_config=VectorParams(size=dim, distance=Distance.COSINE)
+            collection_name=actual_collection, vectors_config=VectorParams(size=dim, distance=Distance.COSINE)
         )
+
+    return actual_collection
+
+
+async def delete_tenant_collection_async(client: Any, tenant_id: str, base_name: str = "vectors") -> bool:
+    """
+    Delete a tenant's collection from Qdrant.
+
+    Args:
+        client: Async Qdrant client instance
+        tenant_id: Tenant identifier
+        base_name: Base collection name (default: "vectors")
+
+    Returns:
+        True if collection was deleted, False if it didn't exist
+    """
+    collection_name = get_tenant_collection_name(tenant_id, base_name)
+    try:
+        await client.delete_collection(collection_name)
+        return True
+    except Exception:
+        return False
 
 
 async def close_async_client() -> None:

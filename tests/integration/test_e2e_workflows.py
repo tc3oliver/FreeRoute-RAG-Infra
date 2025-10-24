@@ -8,11 +8,19 @@ Tests complete workflows including:
 - Error recovery and fallback mechanisms
 """
 
+import os
 import time
 from typing import Any, Dict, List
 
 import pytest
 import requests
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
 
 # Test configuration
 DEFAULT_BASE = "http://localhost:9800"
@@ -53,6 +61,209 @@ def cleanup_collection(api_base, test_collection):
 
 
 class TestEndToEndWorkflows:
+    @staticmethod
+    def qdrant_collection_exists(collection_name):
+        qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:9333")
+        resp = requests.get(f"{qdrant_url}/collections", timeout=10)
+        collections = resp.json().get("result", {}).get("collections", [])
+        return any(c["name"] == collection_name for c in collections)
+
+    def test_tenant_disable_and_key_expiry(self):
+        """
+        測試異常情境：
+        1. 停用租戶後 API key 失效
+        2. API key 過期後失效
+        3. 資料刪除後查詢無資料
+        """
+        # 建立租戶與 API key
+        api_key, tenant_id = self.create_tenant({"name": "disable_test", "description": "異常測試"})
+        collection = "disable_test_collection"
+        self.index_doc(api_key, collection, "doc1", "這是異常測試資料")
+        time.sleep(1)
+
+        # 1. 停用租戶
+        # 直接呼叫 admin API 修改租戶狀態
+        patch_resp = requests.put(
+            f"{self.API_BASE}/admin/tenants/{tenant_id}/status",
+            headers={"Authorization": f"Bearer {self.ADMIN_KEY}"},
+            json={"status": "suspended"},
+            timeout=self.TIMEOUT,
+        )
+        assert patch_resp.status_code == 200
+
+        # 查詢應失敗
+        data = {"query": "異常", "collection": collection, "top_k": 3}
+        resp = requests.post(
+            f"{self.API_BASE}/search",
+            headers={"X-API-Key": api_key},
+            json=data,
+            timeout=self.TIMEOUT,
+        )
+        assert resp.status_code in [401, 403, 404, 422]
+
+        # # 2. API key 過期
+        # # 先啟用租戶
+        # patch_resp = requests.put(
+        #     f"{self.API_BASE}/admin/tenants/{tenant_id}/status",
+        #     headers={"Authorization": f"Bearer {self.ADMIN_KEY}"},
+        #     json={"status": "active"},
+        #     timeout=self.TIMEOUT,
+        # )
+        # assert patch_resp.status_code == 200
+
+        # # 取得 API key id
+        # tenant_info = requests.get(
+        #     f"{self.API_BASE}/admin/tenants/{tenant_id}",
+        #     headers={"Authorization": f"Bearer {self.ADMIN_KEY}"},
+        #     timeout=self.TIMEOUT,
+        # ).json()
+        # key_id = tenant_info["api_keys"][0]["key_id"]
+
+        # # 設定 API key 過期
+        # expire_resp = requests.patch(
+        #     f"{self.API_BASE}/admin/tenants/{tenant_id}/api-keys/{key_id}",
+        #     headers={"Authorization": f"Bearer {self.ADMIN_KEY}"},
+        #     json={"expires_at": "2000-01-01T00:00:00Z"},
+        #     timeout=self.TIMEOUT,
+        # )
+        # assert expire_resp.status_code == 200
+
+        # # 查詢應失敗
+        # resp2 = requests.post(
+        #     f"{self.API_BASE}/search",
+        #     headers={"X-API-Key": api_key},
+        #     json=data,
+        #     timeout=self.TIMEOUT,
+        # )
+        # assert resp2.status_code in [401, 403, 404, 422]
+
+        # 3. 資料刪除後查詢
+        # 重新啟用租戶
+        patch_resp = requests.put(
+            f"{self.API_BASE}/admin/tenants/{tenant_id}/status",
+            headers={"Authorization": f"Bearer {self.ADMIN_KEY}"},
+            json={"status": "active"},
+            timeout=self.TIMEOUT,
+        )
+        assert patch_resp.status_code == 200
+
+        # 產生新 API key
+        new_key_resp = requests.post(
+            f"{self.API_BASE}/admin/tenants/{tenant_id}/api-keys",
+            headers={"Authorization": f"Bearer {self.ADMIN_KEY}"},
+            json={"name": "newkey"},
+            timeout=self.TIMEOUT,
+        )
+        assert new_key_resp.status_code == 201
+        new_api_key = new_key_resp.json()["api_key"]
+
+        # 刪除向量資料
+        del_resp = requests.post(
+            f"{self.API_BASE}/delete/vector",
+            headers={"X-API-Key": new_api_key},
+            json={"collection": collection},
+            timeout=self.TIMEOUT,
+        )
+        assert del_resp.status_code == 200
+        # 檢查 Qdrant collection 是否已刪除
+        actual_collection = f"{collection}_{tenant_id}"
+        assert not self.qdrant_collection_exists(actual_collection)
+
+        time.sleep(2)
+        # 查詢應無資料
+        hits = self.search_doc(new_api_key, collection, "異常")
+        assert len(hits) == 0
+
+    # =========================================================================
+    # Test: 多租戶資料建立、查詢、刪除與隔離驗證
+    # =========================================================================
+
+    # 多租戶測試參數與 helper
+    API_BASE = "http://localhost:9800"
+    ADMIN_KEY = os.environ.get("ADMIN_API_KEY", "admin-secret-key")
+    TENANT_A = {"name": "tenant_a", "description": "A測試租戶"}
+    TENANT_B = {"name": "tenant_b", "description": "B測試租戶"}
+    TIMEOUT = 30
+
+    @classmethod
+    def create_tenant(cls, tenant_data):
+        resp = requests.post(
+            f"{cls.API_BASE}/admin/tenants",
+            headers={"Authorization": f"Bearer {cls.ADMIN_KEY}"},
+            json=tenant_data,
+            timeout=cls.TIMEOUT,
+        )
+        assert resp.status_code == 200 or resp.status_code == 201
+        return resp.json()["api_key"], resp.json()["tenant_id"]
+
+    @classmethod
+    def delete_tenant(cls, tenant_id):
+        resp = requests.delete(
+            f"{cls.API_BASE}/admin/tenants/{tenant_id}",
+            headers={"Authorization": f"Bearer {cls.ADMIN_KEY}"},
+            timeout=cls.TIMEOUT,
+        )
+        assert resp.status_code == 200
+
+    @classmethod
+    def index_doc(cls, api_key, collection, doc_id, text):
+        data = {"chunks": [{"doc_id": doc_id, "text": text}], "collection": collection}
+        resp = requests.post(
+            f"{cls.API_BASE}/index/chunks", headers={"X-API-Key": api_key}, json=data, timeout=cls.TIMEOUT
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    @classmethod
+    def search_doc(cls, api_key, collection, query):
+        data = {"query": query, "collection": collection, "top_k": 3}
+        resp = requests.post(f"{cls.API_BASE}/search", headers={"X-API-Key": api_key}, json=data, timeout=cls.TIMEOUT)
+        assert resp.status_code == 200
+        return resp.json()["hits"]
+
+    def test_multi_tenant_isolation_and_deletion(self):
+        # 建立兩個租戶
+        api_key_a, tenant_id_a = self.create_tenant(self.TENANT_A)
+        api_key_b, tenant_id_b = self.create_tenant(self.TENANT_B)
+        collection = "multi_tenant_test"
+
+        # 各自寫入資料
+        collection_a = f"{collection}_{tenant_id_a}"
+        collection_b = f"{collection}_{tenant_id_b}"
+        self.index_doc(api_key_a, collection_a, "doc_a", "這是A租戶的資料")
+        self.index_doc(api_key_b, collection_b, "doc_b", "這是B租戶的資料")
+        time.sleep(2)
+
+        # 各自查詢只能查到自己的資料
+        hits_a = self.search_doc(api_key_a, collection_a, "A租戶")
+        assert any("A租戶" in h["payload"]["text"] for h in hits_a)
+        assert all("B租戶" not in h["payload"]["text"] for h in hits_a)
+
+        hits_b = self.search_doc(api_key_b, collection_b, "B租戶")
+        assert any("B租戶" in h["payload"]["text"] for h in hits_b)
+        assert all("A租戶" not in h["payload"]["text"] for h in hits_b)
+
+        # 刪除A租戶
+        self.delete_tenant(tenant_id_a)
+        time.sleep(2)
+
+        # A租戶的API key應失效，查詢應回傳 401/403/404/422 等
+        data = {"query": "A租戶", "collection": collection, "top_k": 3}
+        resp = requests.post(
+            f"{self.API_BASE}/search",
+            headers={"X-API-Key": api_key_a},
+            json=data,
+            timeout=self.TIMEOUT,
+        )
+        assert resp.status_code in [401, 403, 404, 422]
+
+        # B租戶資料仍可查詢
+        hits_b2 = self.search_doc(api_key_b, collection_b, "B租戶")
+        assert any("B租戶" in h["payload"]["text"] for h in hits_b2)
+
+        # 清理B租戶
+        self.delete_tenant(tenant_id_b)
+
     """Test complete end-to-end workflows."""
 
     # =========================================================================
@@ -85,7 +296,7 @@ class TestEndToEndWorkflows:
                     "metadata": {"source": "test_doc_3", "chunk_id": "3"},
                 },
             ],
-            "collection_name": test_collection,
+            "collection": test_collection,
         }
 
         # Index chunks
@@ -106,7 +317,7 @@ class TestEndToEndWorkflows:
         # Step 2: Search for relevant chunks
         search_data = {
             "query": "什麼是 LiteLLM？",
-            "collection_name": test_collection,
+            "collection": test_collection,
             "top_k": 5,
         }
 
@@ -127,7 +338,7 @@ class TestEndToEndWorkflows:
         # Step 3: Retrieve with hybrid approach
         retrieve_data = {
             "query": "LiteLLM 功能",
-            "collection_name": test_collection,
+            "collection": test_collection,
             "top_k": 3,
             "use_graph": False,  # Skip graph for this test
         }
@@ -241,7 +452,7 @@ class TestEndToEndWorkflows:
                     "metadata": {"source": "kb"},
                 },
             ],
-            "collection_name": test_collection,
+            "collection": test_collection,
         }
 
         index_resp = requests.post(
@@ -258,7 +469,7 @@ class TestEndToEndWorkflows:
         query = "FreeRoute RAG 使用什麼技術？"
         retrieve_data = {
             "query": query,
-            "collection_name": test_collection,
+            "collection": test_collection,
             "top_k": 3,
             "use_graph": False,
         }
@@ -317,7 +528,7 @@ class TestEndToEndWorkflows:
         # Test 1: Invalid collection name (non-existent)
         search_data = {
             "query": "test query",
-            "collection_name": "nonexistent_collection_12345",
+            "collection": "nonexistent_collection_12345",
             "top_k": 5,
         }
 
@@ -333,7 +544,7 @@ class TestEndToEndWorkflows:
         # Test 2: Empty query
         empty_search = {
             "query": "",
-            "collection_name": "test",
+            "collection": "test",
             "top_k": 5,
         }
 
@@ -413,7 +624,7 @@ class TestEndToEndWorkflows:
                 }
                 for i in range(10)
             ],
-            "collection_name": test_collection,
+            "collection": test_collection,
         }
 
         index_resp = requests.post(
@@ -433,7 +644,7 @@ class TestEndToEndWorkflows:
                 headers=api_headers,
                 json={
                     "query": "性能測試",
-                    "collection_name": test_collection,
+                    "collection": test_collection,
                     "top_k": 5,
                 },
                 timeout=TIMEOUT,

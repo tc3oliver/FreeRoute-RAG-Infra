@@ -27,9 +27,12 @@ async def get_async_graph_service() -> AsyncGraphService:
     return AsyncGraphService()
 
 
-@router.post("/probe", dependencies=[Depends(require_key)], response_model=GraphProbeResp)
+@router.post("/probe", response_model=GraphProbeResp)
 async def graph_probe(
-    req: GraphProbeReq, request: Request, service: AsyncGraphService = Depends(get_async_graph_service)
+    req: GraphProbeReq,
+    request: Request,
+    tenant_id: str = Depends(require_key),
+    service: AsyncGraphService = Depends(get_async_graph_service),
 ) -> Dict[str, Any]:
     """Test a provider's JSON/text generation capability (asynchronous)."""
     try:
@@ -44,13 +47,16 @@ async def graph_probe(
         )
 
 
-@router.post("/extract", dependencies=[Depends(require_key)], response_model=GraphExtractResp)
+@router.post("/extract", response_model=GraphExtractResp)
 async def graph_extract(
-    req: GraphReq, request: Request, service: AsyncGraphService = Depends(get_async_graph_service)
+    req: GraphReq,
+    request: Request,
+    tenant_id: str = Depends(require_key),
+    service: AsyncGraphService = Depends(get_async_graph_service),
 ) -> Dict[str, Any]:
     """Extract graph data from text using parallel provider attempts (asynchronous)."""
     try:
-        return await service.extract(req, request.client.host)
+        return await service.extract(req, request.client.host, tenant_id=tenant_id)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except HTTPException:
@@ -62,13 +68,15 @@ async def graph_extract(
         raise HTTPException(status_code=500, detail=f"internal_error: {e}")
 
 
-@router.post("/upsert", dependencies=[Depends(require_key)], response_model=GraphUpsertResp)
+@router.post("/upsert", response_model=GraphUpsertResp)
 async def graph_upsert(
-    req: GraphUpsertReq, service: AsyncGraphService = Depends(get_async_graph_service)
+    req: GraphUpsertReq,
+    tenant_id: str = Depends(require_key),
+    service: AsyncGraphService = Depends(get_async_graph_service),
 ) -> Dict[str, Any]:
     """Upsert graph nodes and edges into Neo4j (asynchronous)."""
     try:
-        return await service.upsert(req)
+        return await service.upsert(req, tenant_id=tenant_id)
     except RuntimeError as re:
         raise HTTPException(status_code=503, detail=str(re))
     except Exception as e:
@@ -78,13 +86,15 @@ async def graph_upsert(
         raise HTTPException(status_code=502, detail=f"neo4j_error: {e}")
 
 
-@router.post("/query", dependencies=[Depends(require_key)], response_model=GraphQueryResp)
+@router.post("/query", response_model=GraphQueryResp)
 async def graph_query(
-    req: GraphQueryReq, service: AsyncGraphService = Depends(get_async_graph_service)
+    req: GraphQueryReq,
+    tenant_id: str = Depends(require_key),
+    service: AsyncGraphService = Depends(get_async_graph_service),
 ) -> Dict[str, Any]:
     """Execute a read-only Cypher query on Neo4j (asynchronous)."""
     try:
-        return await service.query(req)
+        return await service.query(req, tenant_id=tenant_id)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except RuntimeError as re:
