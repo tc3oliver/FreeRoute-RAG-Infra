@@ -24,7 +24,7 @@ docker compose up -d --build
 
 ## Authentication
 
-* **Gateway**: `X-API-Key: <key>` (or `Authorization: Bearer <key>`)
+* **Gateway**: `Authorization: Bearer <key>`
   Dev key: `dev-key` (set `API_GATEWAY_KEYS` for prod).
 * **LiteLLM Proxy**: `Authorization: Bearer <LITELLM_MASTER_KEY>`
   (`LITELLM_MASTER_KEY` preferred; `LITELLM_KEY` supported for legacy).
@@ -100,8 +100,7 @@ curl -s -H "X-API-Key: dev-key" http://localhost:9800/whoami | jq
 
 Format:
 
-- `X-API-Key: sk-{tenant_id}-...`
-- or `Authorization: Bearer sk-{tenant_id}-...`
+- `Authorization: Bearer sk-{tenant_id}-...`
 
 (Default dev key is `dev-key`; for production, admins must create tenants and assign keys.)
 
@@ -115,7 +114,7 @@ Example (Python, using the new openai client):
 from openai import OpenAI
 
 # Point the client to the Gateway's OpenAI-compatible endpoint
-client = OpenAI(base_url="http://localhost:9800/v1", api_key="dev-key")
+client = OpenAI(base_url="http://localhost:9800/v1", api_key="sk-tenantid-...")
 
 # Chat
 resp = client.chat.completions.create(
@@ -129,7 +128,7 @@ emb = client.embeddings.create(model="local-embed", input=["What is RAG?"])
 print(emb)
 ```
 
-Note: the Gateway validates `X-API-Key` or `Authorization: Bearer <key>`. The default development key is `dev-key`.
+Note: the Gateway only validates `Authorization: Bearer <key>`. The default development key is `dev-key`.
 
 ### `POST /index/chunks`
 
@@ -150,7 +149,7 @@ Upsert chunk vectors to Qdrant.
 
 ```bash
 curl -X POST http://localhost:9800/index/chunks \
-  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
   -d '{"collection":"kb","chunks":[{"doc_id":"alice","text":"Alice...","metadata":{}}]}' | jq
 ```
 
@@ -170,7 +169,7 @@ Vector similarity search.
 
 ```bash
 curl -X POST http://localhost:9800/search \
-  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
   -d '{"query":"Python engineer skills","top_k":3,"collection":"knowledge_base"}' | jq
 ```
 
@@ -196,7 +195,7 @@ Hybrid retrieval (vector + optional knowledge-graph expansion).
 
 ```bash
 curl -X POST http://localhost:9800/retrieve \
-  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
   -d '{"query":"Who works at Acme and what skills?","top_k":5,"include_subgraph":true}' | jq
 ```
 
@@ -232,7 +231,7 @@ Chat completions; supports `json_mode` to request JSON-only responses (Gateway i
 
 ```bash
 curl -X POST http://localhost:9800/chat \
-  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"List two benefits of RAG in JSON"}],"json_mode":true}' | jq
 ```
 
@@ -252,7 +251,7 @@ Raw embeddings via LiteLLM `local-embed` (Ollama).
 
 ```bash
 curl -X POST http://localhost:9800/embed \
-  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
   -d '{"texts":["What is RAG?","GraphRAG?"]}' | jq
 ```
 
@@ -278,7 +277,7 @@ Rerank an array of documents. The Gateway forwards to the Reranker service at `R
 
 ```bash
 curl -X POST http://localhost:9800/rerank \
-  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
   -d '{"query":"What is AI","documents":["A","B"],"top_n":2}' | jq
 ```
 
@@ -304,7 +303,7 @@ LLM-based graph extraction with JSON schema validation.
 
 ```bash
 curl -X POST http://localhost:9800/graph/extract \
-  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
   -d '{"context":"Alice joined Acme in 2022...","strict":false}' | jq
 ```
 
@@ -349,7 +348,7 @@ Run read-only Cypher queries. Requests containing mutating keywords (e.g., `CREA
 
 ```bash
 curl -X POST http://localhost:9800/graph/query \
-  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
   -d '{"query":"MATCH (p:Person)-[r]->(c:Company) RETURN p.id, type(r), c.id LIMIT 10"}' | jq
 ```
 
@@ -369,7 +368,7 @@ Lightweight provider probe for JSON adherence and text fallback.
 
 ```bash
 curl -X POST http://localhost:9800/graph/probe \
-  -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
   -d '{"model":"graph-extractor","strict_json":true}' | jq
 ```
 
@@ -547,7 +546,7 @@ curl -X POST http://localhost:9080/rerank \
 
    ```bash
    curl -X POST http://localhost:9800/retrieve \
-     -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
+     -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
      -d '{"query":"Who works at Acme Corporation?","include_subgraph":true}' | jq
    ```
 
