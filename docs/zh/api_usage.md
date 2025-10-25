@@ -102,13 +102,12 @@ curl -s -H "X-API-Key: dev-key" http://localhost:9800/whoami | jq
 格式如下：
 
 - `X-API-Key: sk-{tenant_id}-...`
-- 或 `Authorization: Bearer sk-{tenant_id}-...`
 
+* **Gateway**：`Authorization: Bearer <key>`
 （開發預設金鑰為 `dev-key`，正式環境請由管理員建立租戶並分配金鑰）
 
-### 使用 OpenAI SDK 指向 Gateway 的 /v1（OpenAI 風格）
-
-如果你想直接用官方 OpenAI SDK（或相容的實作）呼叫 Gateway 的 OpenAI 風格 API（例如 `/v1/chat/completions`、`/v1/embeddings`），只要把 SDK 的 base URL 指向 `http://localhost:9800/v1`，並以 Gateway 的 API Key 當作 Bearer token（或使用 `X-API-Key` header）。這樣絕大多數現有程式碼不需要修改，只需更改 client 初始化的 endpoint 與金鑰。
+格式如下：
+- `Authorization: Bearer sk-{tenant_id}-...`
 
 範例（Python，使用 openai 的新版 client）
 
@@ -125,50 +124,50 @@ resp = client.chat.completions.create(
 )
 print(resp)
 
-# Embeddings
+備註：Gateway 只驗證 `Authorization: Bearer <key>`。開發預設金鑰為 `dev-key`。
 emb = client.embeddings.create(model="local-embed", input=["What is RAG?"])
 print(emb)
-```
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
 
 備註：Gateway 會驗證 `X-API-Key` 或 `Authorization: Bearer <key>`。開發預設金鑰為 `dev-key`。
 
 ### `POST /index/chunks` — 上傳分段向量至 Qdrant
-
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
 **Request**
 
 ```json
 {
-  "collection": "chunks",
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
   "chunks": [
     { "doc_id": "doc1", "text": "…", "metadata": { "file_path": "/data/doc1.md" } }
   ]
 }
-```
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
 
 **Example**
 
 ```bash
-curl -X POST http://localhost:9800/index/chunks \
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
   -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
   -d '{"collection":"kb","chunks":[{"doc_id":"alice","text":"Alice...","metadata":{}}]}' | jq
 ```
 
----
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
 
 ### `POST /search` — 向量相似度搜尋
 
 **Request**
-
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
 ```json
 { "query": "Python engineer skills", "top_k": 5, "collection": "chunks" }
 ```
 
-**Example**
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
 
 ```bash
 curl -X POST http://localhost:9800/search \
   -H "X-API-Key: dev-key" -H "Content-Type: application/json" \
-  -d '{"query":"Python engineer skills","top_k":3,"collection":"knowledge_base"}' | jq
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
 ```
 
 ---
@@ -178,7 +177,7 @@ curl -X POST http://localhost:9800/search \
 **Request**
 
 ```json
-{
+  -H "Authorization: Bearer dev-key" -H "Content-Type: application/json" \
   "query": "Who works at Acme Corporation and what skills do they have?",
   "top_k": 5,
   "collection": "knowledge_base",
