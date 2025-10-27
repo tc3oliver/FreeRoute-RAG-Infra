@@ -23,7 +23,7 @@ jobs:
           pip-audit --format=json --output=pip_audit.json || true
 
       - name: Upload pip-audit report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: pip-audit-report
           path: pip_audit.json
@@ -34,7 +34,7 @@ jobs:
           bandit -r services -f json -o bandit.json || true
 
       - name: Upload bandit report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: bandit-report
           path: bandit.json
