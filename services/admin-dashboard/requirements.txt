@@ -1,0 +1,10 @@
+fastapi>=0.95.0
+uvicorn[standard]
+httpx
+SQLAlchemy>=1.4
+asyncpg
+qdrant-client
+neo4j
+python-dotenv
+bcrypt
+bcrypt

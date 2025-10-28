@@ -1,0 +1,22 @@
+body{font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;line-height:1.4;margin:0;background:#f7fafc;color:#0f172a}
+#app{max-width:980px;margin:24px auto;padding:18px;background:#fff;border-radius:8px;box-shadow:0 6px 18px rgba(15,23,42,0.06)}
+header{display:flex;justify-content:space-between;align-items:center}
+header h1{margin:0;font-size:20px}
+#token-area input{padding:6px 8px;margin-right:6px;width:260px}
+#tenant-form input{padding:6px 8px;margin-right:6px}
+button{background:#0ea5a4;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer}
+button.secondary{background:#64748b}
+section{margin-top:18px}
+#tenant-list{margin-top:12px}
+.tenant{padding:10px;border:1px solid #e6eef0;border-radius:6px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.tenant .meta{font-size:13px;color:#475569}
+.small{font-size:12px;color:#94a3b8}
+pre{background:#0f172a;color:#e6eef0;padding:8px;border-radius:6px;overflow:auto}
+
+/* table styles for graph records */
+.records-table th, .records-table td{padding:8px;border-bottom:1px solid #e6eef0}
+.records-table tbody tr:hover{background:#f1f5f9}
+
+/* modal */
+.modal{position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(15,23,42,0.6);display:flex;align-items:center;justify-content:center;z-index:9999}
+.modal-content{background:#fff;padding:16px;border-radius:8px;max-width:800px;width:90%;box-shadow:0 10px 30px rgba(2,6,23,0.2);color:#0f172a}
