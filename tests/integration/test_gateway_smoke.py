@@ -78,6 +78,11 @@ DEFAULT_BASE = os.environ.get("API_GATEWAY_BASE", "http://localhost:9800")
 DEFAULT_KEY = os.environ.get("API_GATEWAY_KEY", "dev-key")
 DEFAULT_HEADER = os.environ.get("API_GATEWAY_AUTH_HEADER", "X-API-Key")
 
+# For deriving tenant_id from key if possible
+DEFAULT_KEY = "sk-vo6knp0j--Iepy5pDLSKw8UsT-hFo0i-_tqsiZ3dAprvtRkz_rXw"
+DEFAULT_HEADER = "Authorization"
+tenant_id = DEFAULT_KEY.split("-")[1] if "-" in DEFAULT_KEY else "default"
+
 # Test data identifiers for cleanup
 TEST_COLLECTION = "test_collection_smoke"
 TEST_NODE_IDS = ["test_node_1", "test_node_2"]
@@ -134,6 +139,7 @@ def cleanup_vector_data(base: str, headers: Dict[str, str]) -> bool:
     Uses Qdrant's direct API to delete test collection.
     """
     try:
+        TEST_COLLECTION = "test_collection_smoke_" + tenant_id
         # Try to get Qdrant endpoint from environment or use default
         qdrant_base = os.environ.get("QDRANT_URL", "http://localhost:9333")
 

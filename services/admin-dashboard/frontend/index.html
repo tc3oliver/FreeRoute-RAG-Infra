@@ -1,0 +1,135 @@
+  <div id="app">
+    <header>
+      <h1>Admin Dashboard</h1>
+      <nav>
+        <a href="#/home" class="nav-link">Home</a>
+        <a href="#/tenants" class="nav-link">Tenants</a>
+        <a href="#/apikeys" class="nav-link">API Keys</a>
+        <a href="#/rag" class="nav-link">RAG (Qdrant)</a>
+        <a href="#/graph" class="nav-link">Graph (Neo4j)</a>
+      </nav>
+      <div id="token-area">
+        <input id="admin-token" placeholder="輸入 ADMIN_TOKEN" />
+        <button id="save-token">儲存</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="page-home" class="page">
+        <h2>Home</h2>
+        <div>
+          <button id="check-health">檢查 /health</button>
+          <pre id="health-result"></pre>
+        </div>
+      </section>
+
+      <section id="page-rag-collection" class="page" style="display:none">
+        <h2>RAG Collection</h2>
+        <div>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+            <button id="rag-back" class="secondary">Back</button>
+            <b id="rag-current-collection">""</b>
+            <button id="rag-prev" class="secondary">Prev</button>
+            <button id="rag-next" class="secondary">Next</button>
+            <input id="rag-limit" placeholder="page size" style="width:80px" />
+            <span id="rag-page-info" class="small">Page 1</span>
+          </div>
+          <div id="rag-points-list">
+            <table class="records-table" style="width:100%;border-collapse:collapse">
+              <thead>
+                <tr>
+                  <th>doc_id</th>
+                  <th>text</th>
+                  <th>metadata</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="rag-points-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-tenants" class="page" style="display:none">
+        <h2>Tenants</h2>
+        <div id="tenant-form">
+          <input id="tenant-name" placeholder="tenant name" />
+          <input id="tenant-desc" placeholder="description" />
+          <button id="create-tenant">建立 Tenant</button>
+        </div>
+        <div id="tenant-list"></div>
+      </section>
+
+      <section id="page-apikeys" class="page" style="display:none">
+        <h2>API Keys</h2>
+        <div id="apikey-controls" class="small">選擇 Tenant 後可建立 API Key（建立會回傳一次性明文）</div>
+        <div id="apikey-list"></div>
+      </section>
+
+      <section id="page-rag" class="page" style="display:none">
+        <h2>RAG (Qdrant)</h2>
+        <div>
+          <button id="rag-list-collections">列出 collections</button>
+          <input id="rag-collection-name" placeholder="collection name" />
+          <button id="rag-create-collection">建立 collection</button>
+          <div id="rag-result" class="small"></div>
+          <div id="rag-collections-list"></div>
+        </div>
+      </section>
+
+      <section id="page-graph" class="page" style="display:none">
+        <h2>Graph (Neo4j)</h2>
+        <div>
+          <button id="graph-health">health</button>
+          <button id="graph-import-sample">import sample</button>
+          <div id="graph-result" class="small"></div>
+          <div id="graph-cypher-area">
+            <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+              <input id="graph-label-filter" placeholder="label filter (optional)" />
+              <input id="graph-tenant-filter" placeholder="tenant_id (optional)" style="width:160px" />
+              <button id="graph-prev" class="secondary">Prev</button>
+              <button id="graph-next" class="secondary">Next</button>
+              <input id="graph-limit" placeholder="page size" style="width:80px" />
+              <span id="graph-page-info" class="small">Page 1</span>
+              <button id="graph-list-records">列出 nodes</button>
+            </div>
+            <textarea id="graph-cypher" rows="3" style="width:100%" placeholder="MATCH (n) RETURN count(n)"></textarea>
+            <div style="margin-top:6px">
+              <button id="graph-run-cypher">執行 Cypher (read)</button>
+              <button id="graph-run-cypher-write">執行 Cypher (write)</button>
+            </div>
+            <div id="graph-records-list" style="margin-top:8px">
+              <table id="graph-records-table" class="records-table" style="width:100%;border-collapse:collapse">
+                <thead>
+                  <tr>
+                    <th style="text-align:left">ID</th>
+                    <th style="text-align:left">Labels</th>
+                    <th style="text-align:left">Tenant</th>
+                    <th style="text-align:left">Props preview</th>
+                    <th style="text-align:left">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="graph-records-tbody"></tbody>
+              </table>
+            </div>
+            <!-- modal for showing full props -->
+            <div id="graph-props-modal" class="modal" style="display:none">
+              <div class="modal-content">
+                <button id="modal-close" class="secondary" style="float:right">Close</button>
+                <h3>Node properties</h3>
+                <pre id="modal-body" style="white-space:pre-wrap;max-height:400px;overflow:auto"></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <small>Admin Dashboard — minimal frontend scaffold</small>
+    </footer>
+  </div>
+
+  <script src="/admin/ui/app.js"></script>
+</body>
+</html>
