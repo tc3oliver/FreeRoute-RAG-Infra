@@ -157,16 +157,18 @@ services:
       UI_USERNAME: ${UI_USERNAME:-admin}
       UI_PASSWORD: ${UI_PASSWORD:-admin123}
       ENABLE_METRICS: "True"
-      # 每日10M tokens 上限(保留 1M 作系統用途)
-      OPENAI_TPD_LIMIT: "9000000"
-      # OPENAI_TPD_LIMIT: "5000"   # CHG: 測試用，降低上限
-      REDIS_URL: "redis://redis:6379/0"
-      TZ_OFFSET_HOURS: "8"
+      # Token cap settings (read from .env, with fallback defaults)
+      OPENAI_TPD_LIMIT: ${OPENAI_TPD_LIMIT:-10000000}
+      OPENAI_TPD_LIMIT__OPENAI_GPT_5: ${OPENAI_TPD_LIMIT__OPENAI_GPT_5:-1000000}
+      OPENAI_REROUTE_REAL: ${OPENAI_REROUTE_REAL:-true}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      TZ_OFFSET_HOURS: ${TZ_OFFSET_HOURS:-8}
       # Provider keys（.env 注入）
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       GROQ_API_KEY: ${GROQ_API_KEY}
+      MODELSCOPE_API_KEY: ${MODELSCOPE_API_KEY}
       GRAPH_SCHEMA_PATH: /app/schemas/graph_schema.json
     volumes:
       - ./schemas/graph_schema.json:/app/schemas/graph_schema.json:ro

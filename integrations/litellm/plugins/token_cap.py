@@ -45,7 +45,7 @@ TZ_OFFSET_HOURS = int(os.getenv("TZ_OFFSET_HOURS", "8"))
 GRAPH_SCHEMA_PATH = os.getenv("GRAPH_SCHEMA_PATH", "/app/schemas/graph_schema.json")
 
 
-OPENAI_ENTRYPOINTS_EXACT = {"rag-answer", "graph-extractor"}
+OPENAI_ENTRYPOINTS_EXACT = {"rag-answer", "rag-answer-pro", "graph-extractor"}
 OPENAI_ENTRYPOINTS_PREFIX = ("graph-extractor",)
 OPENAI_REROUTE_REAL = os.getenv("OPENAI_REROUTE_REAL", "true").lower() == "true"
 
@@ -53,6 +53,7 @@ OPENAI_REROUTE_REAL = os.getenv("OPENAI_REROUTE_REAL", "true").lower() == "true"
 # === reroute 設定 ===
 REROUTE_MAP = {
     "rag-answer": "rag-answer-gemini",
+    "rag-answer-pro": "rag-answer",  # First fallback to mini before Gemini
     "graph-extractor": "graph-extractor-gemini",
     "graph-extractor-o1mini": "graph-extractor-gemini",
 }
@@ -72,6 +73,7 @@ _OPENAI_NAME_PREFIXES = (
 )
 _OPENAI_NAME_EXACT = {
     "gpt-5-mini-2025-08-07",
+    "gpt-5-2025-08-07",
     "gpt-4.1-mini-2025-04-14",
     "o1-mini-2024-09-12",
 }
@@ -102,6 +104,71 @@ def pick_reroute(name: str) -> str:
 def _today_key(prefix: str) -> str:
     now = datetime.datetime.utcnow() + datetime.timedelta(hours=TZ_OFFSET_HOURS)
     return f"{prefix}:{now.strftime('%Y-%m-%d')}"
+
+
+def _sanitize_env_key(name: str) -> str:
+    return "".join(ch if ch.isalnum() else "_" for ch in name).upper()
+
+
+def _get_tpd_limit_for_group(group: Optional[str]) -> int:
+    """Return per-group TPD limit if configured, else the global OPENAI_TPD_LIMIT.
+
+    Env var pattern: OPENAI_TPD_LIMIT__<GROUP>, GROUP uses sanitized name e.g. OPENAI_GPT_5, OPENAI_GPT_5_MINI
+    """
+    if group:
+        key = f"OPENAI_TPD_LIMIT__{_sanitize_env_key(group)}"
+        v = os.getenv(key)
+        if v and v.isdigit():
+            try:
+                return int(v)
+            except Exception:
+                pass
+    return OPENAI_TPD_LIMIT
+
+
+def _tpd_redis_key(group: Optional[str]) -> str:
+    if group:
+        return _today_key(f"tpd:openai:group:{group}")
+    return _today_key("tpd:openai")
+
+
+def _cap_group_from_model_string(model_name: str) -> Optional[str]:
+    """Map concrete OpenAI model name to a logical cap group.
+
+    Example: gpt-5-2025-08-07 -> openai.gpt-5
+             gpt-5-mini-2025-08-07 -> openai.gpt-5-mini
+    Returns None if not an OpenAI gpt-5 family we care about.
+    """
+    if not model_name:
+        return None
+    n = model_name.lower()
+    # strip provider prefix if present
+    if n.startswith("openai/"):
+        n = n.split("/", 1)[1]
+    # CRITICAL: check mini BEFORE non-mini to avoid false positives
+    if n.startswith("gpt-5-mini-") or n == "gpt-5-mini":
+        return "openai.gpt-5-mini"
+    if n.startswith("gpt-5-") or n == "gpt-5":
+        return "openai.gpt-5"
+    return None
+
+
+def _cap_group_for_request_model(alias_or_model: str) -> Optional[str]:
+    """Infer cap group from the requested model alias or full name before routing.
+
+    We know our aliases: rag-answer -> gpt-5-mini, rag-answer-pro -> gpt-5
+    Also handle direct openai model names when passed through.
+    """
+    if not alias_or_model:
+        return None
+    name = alias_or_model.lower()
+    if name == "rag-answer":
+        return "openai.gpt-5-mini"
+    if name == "rag-answer-pro":
+        return "openai.gpt-5"
+    # direct model path
+    grp = _cap_group_from_model_string(name)
+    return grp
 
 
 def _load_graph_schema(path: str) -> Dict[str, Any]:
@@ -234,8 +301,10 @@ class TokenCap(_CustomLogger):
             return data
 
         model = data.get("model") or ""
+        # Remember cap group for post-hook accounting
+        cap_group = _cap_group_for_request_model(model)
         # structured pre-call log
-        logger.info("[TokenCap] pre model=%s", model, extra={"event": "pre", "model": model})
+        logger.info("[TokenCap] pre model=%s", model, extra={"event": "pre", "model": model, "cap_group": cap_group})
 
         # check TPD usage if redis available
         r = await self._redis()
@@ -248,13 +317,21 @@ class TokenCap(_CustomLogger):
             used = 0
         else:
             try:
-                tpd_key = _today_key("tpd:openai")
+                # Prefer per-group limit if configured; else use global
+                per_limit = _get_tpd_limit_for_group(cap_group)
+                use_per = cap_group is not None
+                tpd_key = _tpd_redis_key(cap_group) if use_per else _tpd_redis_key(None)
                 used = int(await r.get(tpd_key) or 0)
                 logger.debug(
                     "[TokenCap] tpd_status used=%s limit=%s",
                     used,
-                    OPENAI_TPD_LIMIT,
-                    extra={"event": "tpd_status", "used": used, "limit": OPENAI_TPD_LIMIT},
+                    per_limit if use_per else OPENAI_TPD_LIMIT,
+                    extra={
+                        "event": "tpd_status",
+                        "used": used,
+                        "limit": per_limit if use_per else OPENAI_TPD_LIMIT,
+                        "scope": cap_group if use_per else "global",
+                    },
                 )
             except Exception as e:
                 logger.warning(
@@ -264,7 +341,9 @@ class TokenCap(_CustomLogger):
                 )
                 used = 0
 
-        if used >= OPENAI_TPD_LIMIT:
+        # Determine effective limit and whether to enforce per-group
+        eff_limit = _get_tpd_limit_for_group(cap_group)
+        if used >= eff_limit:
             hops = 0
             MAX_HOPS = 3
 
@@ -275,9 +354,56 @@ class TokenCap(_CustomLogger):
                     return True
                 return False
 
+            async def _check_alternative_quota(alternative_model: str) -> bool:
+                """Check if alternative model still has quota available."""
+                alt_cap_group = _cap_group_for_request_model(alternative_model)
+                if not alt_cap_group:
+                    return True  # Non-OpenAI models always available
+
+                if r is None:
+                    return True  # Redis unavailable, allow fallback
+
+                try:
+                    alt_limit = _get_tpd_limit_for_group(alt_cap_group)
+                    alt_tpd_key = _tpd_redis_key(alt_cap_group)
+                    alt_used = int(await r.get(alt_tpd_key) or 0)
+                    logger.info(
+                        "[TokenCap] checking_alternative model=%s used=%s limit=%s",
+                        alternative_model,
+                        alt_used,
+                        alt_limit,
+                        extra={
+                            "event": "checking_alternative",
+                            "model": alternative_model,
+                            "used": alt_used,
+                            "limit": alt_limit,
+                        },
+                    )
+                    return alt_used < alt_limit
+                except Exception as e:
+                    logger.warning("[TokenCap] error checking alternative quota: %s", e)
+                    return True
+
             while _needs_reroute(model) and hops < MAX_HOPS:
                 if is_openai_entrypoint(model):
-                    new_model = pick_reroute(model)
+                    # For rag-answer-pro (gpt-5), first try rag-answer (gpt-5-mini)
+                    if model == "rag-answer-pro":
+                        mini_alternative = "rag-answer"
+                        if await _check_alternative_quota(mini_alternative):
+                            new_model = mini_alternative
+                            logger.info(
+                                "[TokenCap] gpt-5 quota exceeded, trying gpt-5-mini alternative",
+                                extra={"event": "try_mini_alternative", "from": model, "to": new_model},
+                            )
+                        else:
+                            # Both gpt-5 and gpt-5-mini exceeded, fallback to Gemini
+                            new_model = pick_reroute(model)
+                            logger.info(
+                                "[TokenCap] both gpt-5 and gpt-5-mini quota exceeded, fallback to Gemini",
+                                extra={"event": "all_openai_exceeded", "fallback": new_model},
+                            )
+                    else:
+                        new_model = pick_reroute(model)
                 else:
                     new_model = DEFAULT_GRAPH_REROUTE if _looks_like_graph_call(data) else DEFAULT_RAG_REROUTE
 
@@ -286,13 +412,39 @@ class TokenCap(_CustomLogger):
 
                 data["model"] = new_model
                 model = new_model
+                cap_group = _cap_group_for_request_model(model)
                 hops += 1
                 logger.info(
-                    "[TokenCap] reroute hop=%s new_model=%s",
+                    "[TokenCap] reroute hop=%s new_model=%s cap_group=%s",
                     hops,
                     new_model,
-                    extra={"event": "reroute", "hop": hops, "new_model": new_model},
+                    cap_group,
+                    extra={"event": "reroute", "hop": hops, "new_model": new_model, "cap_group": cap_group},
                 )
+
+                # Re-check quota for the new model
+                if cap_group and r is not None:
+                    try:
+                        new_limit = _get_tpd_limit_for_group(cap_group)
+                        new_tpd_key = _tpd_redis_key(cap_group)
+                        new_used = int(await r.get(new_tpd_key) or 0)
+                        if new_used >= new_limit:
+                            logger.info(
+                                "[TokenCap] fallback model also exceeded quota, continuing reroute",
+                                extra={
+                                    "event": "fallback_exceeded",
+                                    "model": model,
+                                    "used": new_used,
+                                    "limit": new_limit,
+                                },
+                            )
+                            continue
+                        else:
+                            # Quota available, stop rerouting
+                            break
+                    except Exception as e:
+                        logger.warning("[TokenCap] error checking new model quota: %s", e)
+                        break
 
             if (model.lower().startswith("openai/") or is_openai_model_name(model)) and not OPENAI_REROUTE_REAL:
                 from fastapi import HTTPException
@@ -340,6 +492,13 @@ class TokenCap(_CustomLogger):
                 extra={"event": "schema_inject", "model": model},
             )
 
+        # Attach cap group hint for post-hook accounting
+        try:
+            md = data.setdefault("metadata", {})
+            if isinstance(md, dict):
+                md.setdefault("tokencap_group", cap_group)
+        except Exception:
+            pass
         return data
 
     async def async_post_call_success_hook(self, *args, **kwargs):
@@ -369,10 +528,19 @@ class TokenCap(_CustomLogger):
                         extra={"event": "redis_unavailable"},
                     )
                     return
-                key = _today_key("tpd:openai")
+                # Compute cap group from actual upstream model
+                cap_group_resp = _cap_group_from_model_string(model)
+
                 p = r.pipeline()
-                p.incrby(key, total)
-                p.expire(key, 60 * 60 * 36)
+                # Always increment global counter for observability
+                gkey = _tpd_redis_key(None)
+                p.incrby(gkey, total)
+                p.expire(gkey, 60 * 60 * 36)
+                # Increment per-group if we can resolve one
+                if cap_group_resp:
+                    ekey = _tpd_redis_key(cap_group_resp)
+                    p.incrby(ekey, total)
+                    p.expire(ekey, 60 * 60 * 36)
                 await p.execute()
         except Exception as e:
             logger.exception(

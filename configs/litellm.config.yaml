@@ -9,6 +9,16 @@ model_list:
       mode: completion
       base_model: openai
 
+  - model_name: rag-answer-pro
+    litellm_params:
+      model: openai/gpt-5-2025-08-07
+      api_key: os.environ/OPENAI_API_KEY
+      drop_params: true
+    model_info:
+      id: rag-answer-pro
+      mode: completion
+      base_model: openai
+
   - model_name: rag-answer-gemini
     litellm_params:
       model: gemini/gemini-2.5-flash
@@ -16,6 +26,17 @@ model_list:
       temperature: 0.8
       drop_params: true
     model_info: { id: rag-answer-gemini, mode: completion, base_model: google }
+
+  # ModelScope - Qwen (OpenAI 兼容 API)
+  - model_name: rag-answer-modelscope
+    litellm_params:
+      # 透過 OpenAI-compatible 路徑串接 ModelScope
+      model: openai/Qwen/Qwen3-Coder-480B-A35B-Instruct
+      api_key: os.environ/MODELSCOPE_API_KEY
+      api_base: https://api-inference.modelscope.cn/v1
+      temperature: 0.8
+      drop_params: true
+    model_info: { id: rag-answer-modelscope, mode: completion, base_model: modelscope }
 
   # 如果你要「只用免費」的 OpenRouter，請改成 :free 變體
   - model_name: rag-answer-openrouter
@@ -73,7 +94,7 @@ model_list:
     model_info: { id: graph-extractor-gemini, mode: completion, base_model: google }
 
 litellm_settings:
-  request_timeout: 60
+  request_timeout: 300
   json_logs: true
   turn_off_message_logging: true
   redact_user_api_key_info: true
@@ -126,5 +147,7 @@ router_settings:
     strip_trailing_text: true
 
   fallbacks:
-    - {"rag-answer": ["rag-answer-gemini", "rag-answer-openrouter", "rag-answer-groq"]}
+    - {"rag-answer": ["rag-answer-gemini", "rag-answer-modelscope", "rag-answer-openrouter", "rag-answer-groq"]}
+    - {"rag-answer-gemini": ["rag-answer-modelscope", "rag-answer-openrouter", "rag-answer-groq"]}
+    - {"rag-answer-pro": ["rag-answer"]}
     - {"graph-extractor": ["graph-extractor-o1mini", "graph-extractor-o1mini", "graph-extractor-gemini"]}
