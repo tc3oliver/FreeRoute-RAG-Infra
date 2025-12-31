@@ -74,6 +74,8 @@ _OPENAI_NAME_PREFIXES = (
 _OPENAI_NAME_EXACT = {
     "gpt-5-mini-2025-08-07",
     "gpt-5-2025-08-07",
+    "gpt-5.1",
+    "gpt-5.1-2025-11-13",
     "gpt-4.1-mini-2025-04-14",
     "o1-mini-2024-09-12",
 }
@@ -148,7 +150,7 @@ def _cap_group_from_model_string(model_name: str) -> Optional[str]:
     # CRITICAL: check mini BEFORE non-mini to avoid false positives
     if n.startswith("gpt-5-mini-") or n == "gpt-5-mini":
         return "openai.gpt-5-mini"
-    if n.startswith("gpt-5-") or n == "gpt-5":
+    if n.startswith("gpt-5.") or n.startswith("gpt-5-") or n == "gpt-5":
         return "openai.gpt-5"
     return None
 
